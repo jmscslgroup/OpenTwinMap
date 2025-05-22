@@ -1,0 +1,23 @@
+{
+        "148110": {
+                "DEM": {
+                        "asc_path": "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/DEM/Davidson_County_2022_QL1_DEM/Davidson_County_2022_QL1_DEM_tiles/148110.asc",
+                        "bin_path": "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/DEM/Davidson_County_2022_QL1_DEM/Davidson_County_2022_QL1_DEM_tiles/148110.bin",
+                        "x": {
+                                "min": 1764506.0,
+                                "max": 1767504.0
+                        },
+                        "y": {
+                                "min": 631381.0,
+                                "max": 633379.0
+                        },
+                        "z": {
+                                "min": 479.64,
+                                "max": 604.85
+                        }
+                },
+                "LAZ": {
+                        "path": "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/PointCloud/Davidson_County_2022_QL1_laz/Davidson_County_2022_QL1_laz/148110.laz"
+                }
+        }
+}
