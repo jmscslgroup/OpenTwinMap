@@ -20,39 +20,53 @@ Author : Pritam Halder
 Email : pritamhalder.portfolio@gmail.com
 */
 
+/*
+MIT License
+Copyright (c) 2025 Alex Richardson @ Vanderbilt University
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without
+limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
+Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+Author: Alex Richardson @ Vanderbilt University. 
+Email: william.a.richardson@vanderbilt.edu
+*/
+
 #pragma once
 
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdint>
-#include <experimental/filesystem>
 #include <fstream>
 #include <string>
 #include <type_traits>
 #include <vector>
 #include <system_error>
 
-using namespace std::experimental;
 
 struct Coordinate {
-    float latitude;
-    float longitude;
+    float x;
+    float y;
 
     Coordinate()
-        : latitude(0),
-        longitude(0)
+        : x(0),
+        y(0)
     {};
 
-    Coordinate(float latitude, float longitude)
-        : latitude(latitude),
-        longitude(longitude)
-    {
-        if (latitude > 90 || latitude < -90 || longitude > 180 || longitude < -180) {
-            std::string e = "invalid coordinates (" + std::to_string(latitude) +  ":" +  std::to_string(longitude) + ")";
-            throw std::runtime_error(e);
-        }
-    };
+    Coordinate(float x, float y)
+        : x(x),
+        y(y)
+    {};
 
     Coordinate(const Coordinate& o) = default;
     Coordinate& operator=(const Coordinate& o) = default;
@@ -61,14 +75,14 @@ struct Coordinate {
     ~Coordinate() = default;
 
     bool operator<(const Coordinate& o) const {
-        if (latitude == o.latitude) {
-            return longitude < o.longitude;
+        if (y == o.y) {
+            return x < o.x;
         }
-        return latitude < o.latitude;
+        return y < o.y;
     }
 
     bool operator==(const Coordinate& o) const {
-        return latitude == o.latitude && longitude == o.longitude;
+        return x == o.x && y == o.y;
     }
 };
 
@@ -95,12 +109,12 @@ struct Bounds {
     Bounds& operator=(Bounds&& o) noexcept = default;
     ~Bounds() = default;
 
-    bool within(float latitude, float longitude) {
+    bool within(float x, float y) {
         if (
-            latitude >= this->SW.latitude
-            && latitude < this->NE.latitude
-            && longitude >= this->SW.longitude
-            && longitude < this->NE.longitude
+            y >= this->SW.y
+            && y < this->NE.y
+            && x >= this->SW.x
+            && x < this->NE.x
         ) {
             return true;
         } else {
@@ -108,21 +122,6 @@ struct Bounds {
         }
     }
 };
-
-
-/*
-template <typename T>
-concept dem_datatype =
-    std::is_arithmetic_v<T> &&
-    !std::is_same_v<T, bool> &&
-    !std::is_same_v<T, char> &&
-    !std::is_same_v<T, signed char> &&
-    !std::is_same_v<T, unsigned char> &&
-    !std::is_same_v<T, char16_t> &&
-    !std::is_same_v<T, char32_t> &&
-    !std::is_same_v<T, wchar_t>;
-*/
-
 
 template <typename T>
 class DEM {
@@ -133,7 +132,7 @@ private:
     };
 
 
-    int16_t read(const filesystem::path& filepath) {
+    int16_t read(std::ifstream fp) {
         union {T value; uint8_t bytes[sizeof(T)];} t{};
 
         auto serialize = [&t](T value) -> T {
@@ -142,7 +141,6 @@ private:
             return t.value;
         };
 
-        std::ifstream fp(filepath, std::ios::binary);
         T t_value = 0;
 
         if (fp.good() && !fp.eof()) {
@@ -169,25 +167,12 @@ private:
     };
 
 
-    Index index(float latitude, float longitude) {
-        float dem_latitude_index = 0, dem_longitude_index = 0;
+    Index index(float x, float y) {
+        float dem_y_index = 0, dem_x_index = 0;
 
-        if (this->bounds.within(latitude, longitude)) {
-            if (latitude >= this->bounds.SW.latitude) {
-                // Northern Hemisphere
-                dem_latitude_index = (this->bounds.NE.latitude - latitude) / this->type.cellsize;
-            } else {
-                // Southern Hemisphere
-                dem_latitude_index = (latitude - this->bounds.SW.latitude) / this->type.cellsize;
-            }
-
-            if (longitude >= this->bounds.SW.longitude) {
-                // Eastern Hemisphere
-                dem_longitude_index = (longitude - this->bounds.SW.longitude) / this->type.cellsize;
-            } else {
-                // Western Hemisphere
-                dem_longitude_index = (this->bounds.NE.longitude - longitude) / this->type.cellsize;
-            }
+        if (this->bounds.within(x, y)) {
+            dem_y_index = (y - this->bounds.SW.y) / this->type.cellsize;
+            dem_x_index = (x - this->bounds.SW.x) / this->type.cellsize;
         } else {
             return {
                 static_cast<float>(this->type.nodata),
@@ -196,8 +181,8 @@ private:
         }
 
         return {
-            dem_latitude_index,
-            dem_longitude_index
+            dem_y_index,
+            dem_x_index
         };
     };
 
@@ -206,9 +191,9 @@ public:
     struct Type {
         size_t nrows;       // no. of DEM values available in row
         size_t ncols;       // no. of DEM values available in column
-        float yllcorner;    // bottom left latitude
-        float xllcorner;    // bottom left longitude
-        float cellsize;     // distance (in radians) between every DEM values
+        float yllcorner;    // bottom left y
+        float xllcorner;    // bottom left x
+        float cellsize;     // distance (in feet) between every DEM values
         T nodata;           // invalid DEM value representation
 
         Type()
@@ -231,10 +216,6 @@ public:
             if (nrows == 0 || ncols == 0) {
                 throw std::runtime_error("invalid data dimensions, nrows = 0 & ncols = 0");
             }
-            if (yllcorner > 90 || yllcorner < -90 || xllcorner > 180 || xllcorner < -180) {
-                std::string e = "invalid coordinates (" + std::to_string(yllcorner) +  ":" +  std::to_string(xllcorner) + ")";
-                throw std::runtime_error(e);
-            }
         };
 
         Type(const Type& o) = default;
@@ -253,7 +234,7 @@ public:
     DEM() = default;
 
 
-    DEM(const Type& type, const filesystem::path& filepath) {
+    DEM(const Type& type, std::ifstream fp) {
         this->type = type;
         this->bounds = {
             {this->type.yllcorner + (this->type.cellsize * this->type.nrows), this->type.xllcorner},
@@ -262,13 +243,8 @@ public:
             {this->type.yllcorner, this->type.xllcorner + (this->type.cellsize * this->type.ncols)}
         };
 
-        if (!filesystem::exists(filepath)) {
-            std::string e = "DEM file '" + filepath.string() + "' not found";
-            throw std::runtime_error(e);
-        }
-
         // read the DEM file (sets: this->data)
-        if (this->read(filepath) != EXIT_SUCCESS) {
+        if (this->read(fp) != EXIT_SUCCESS) {
             std::string e = "failed to read DEM data from '" + filepath.string() + "'";
             throw std::runtime_error(e);
         }
@@ -282,8 +258,8 @@ public:
     ~DEM() = default;
 
 
-    T altitude(float latitude, float longitude) {
-        Index rc = this->index(latitude, longitude);
+    T altitude(float x, float y) {
+        Index rc = this->index(x, y);
 
         if (rc.row == this->type.nodata || rc.column == this->type.nodata) {
             return this->type.nodata;
@@ -301,8 +277,8 @@ public:
     };
 
 
-    float interpolated_altitude(float latitude, float longitude) {
-        Index rc = this->index(latitude, longitude);
+    float interpolated_altitude(float x, float y) {
+        Index rc = this->index(x, y);
 
         if (rc.row == this->type.nodata || rc.column == this->type.nodata) {
             return this->type.nodata;
@@ -311,16 +287,16 @@ public:
         size_t r = static_cast<size_t>(rc.row);
         size_t c = static_cast<size_t>(rc.column);
 
-        float del_latitude = std::min(rc.row, static_cast<float>(this->type.nrows-1)) - r;
-        float del_longitude = std::min(rc.column, static_cast<float>(this->type.ncols-1)) - c;
+        float del_y = std::min(rc.row, static_cast<float>(this->type.nrows-1)) - r;
+        float del_x = std::min(rc.column, static_cast<float>(this->type.ncols-1)) - c;
 
         size_t next_r = (r == this->type.nrows-1) ? r : r + 1;
         size_t next_c = (c == this->type.ncols-1) ? c : c + 1;
 
-        float altitude =   (1-del_latitude) * (1-del_longitude) * this->data[r][c] +
-                            del_longitude * (1-del_latitude) * this->data[r][next_c] +
-                            (1-del_longitude) * del_latitude * this->data[next_r][c] +
-                            del_latitude * del_longitude * this->data[next_r][next_c];
+        float altitude =   (1-del_y) * (1-del_x) * this->data[r][c] +
+                            del_x * (1-del_y) * this->data[r][next_c] +
+                            (1-del_x) * del_y * this->data[next_r][c] +
+                            del_y * del_x * this->data[next_r][next_c];
 
         return altitude;
     };
