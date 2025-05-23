@@ -133,6 +133,11 @@ private:
         int32_t column;
     };
 
+    struct Interpolated_Index {
+        float row;
+        float column;
+    };
+
 
     int16_t read(std::ifstream& fp) {
         auto serialize = [](T value) -> T {
@@ -179,6 +184,25 @@ private:
             return {
                 static_cast<int32_t>(this->type.nodata),
                 static_cast<int32_t>(this->type.nodata)
+            };
+        }
+
+        return {
+            dem_y_index,
+            dem_x_index
+        };
+    };
+
+    Interpolated_Index interpolated_index(float x, float y) {
+        float dem_y_index = 0, dem_x_index = 0;
+
+        if (this->bounds.within(x, y)) {
+            dem_y_index = ((y - this->bounds.SW.y) / this->type.cellsize);
+            dem_x_index = ((x - this->bounds.SW.x) / this->type.cellsize);
+        } else {
+            return {
+                static_cast<float>(this->type.nodata),
+                static_cast<float>(this->type.nodata)
             };
         }
 
@@ -287,7 +311,7 @@ public:
 
 
     float interpolated_altitude(float x, float y) {
-        Index rc = this->index(x, y);
+        Interpolated_Index rc = this->interpolated_index(x, y);
 
         if (rc.row == this->type.nodata || rc.column == this->type.nodata) {
             return this->type.nodata;
@@ -296,8 +320,8 @@ public:
         size_t r = static_cast<size_t>(rc.row);
         size_t c = static_cast<size_t>(rc.column);
 
-        float del_y = std::min(rc.row, static_cast<float>(this->type.nrows-1)) - r;
-        float del_x = std::min(rc.column, static_cast<float>(this->type.ncols-1)) - c;
+        float del_y = std::min(static_cast<float>(rc.row), static_cast<float>(this->type.nrows-1)) - r;
+        float del_x = std::min(static_cast<float>(rc.column), static_cast<float>(this->type.ncols-1)) - c;
 
         size_t next_r = (r == this->type.nrows-1) ? r : r + 1;
         size_t next_c = (c == this->type.ncols-1) ? c : c + 1;
