@@ -110,11 +110,13 @@ struct Bounds {
     ~Bounds() = default;
 
     bool within(float x, float y) {
+        //std::cout << x << ' ' << y << ' ' << this->SW.x << ' ' << this->SW.y << ' ' << this->NW.x << ' ' << this->NW.y << ' ' << this->SE.x << ' ' << this->SE.y << ' ' << this->NE.x << ' ' << this->NE.y << '\n';
+        //std::cout << x - this->SW.x << ' ' << y - this->SW.y << ' ' << this->NE.y - y << '\n';
         if (
             y >= this->SW.y
-            && y < this->NE.y
+            && y <= this->NE.y
             && x >= this->SW.x
-            && x < this->NE.x
+            && x <= this->NE.x
         ) {
             return true;
         } else {
@@ -127,35 +129,35 @@ template <typename T>
 class DEM {
 private:
     struct Index {
-        float row;
-        float column;
+        int32_t row;
+        int32_t column;
     };
 
 
-    int16_t read(std::ifstream fp) {
-        union {T value; uint8_t bytes[sizeof(T)];} t{};
-
-        auto serialize = [&t](T value) -> T {
+    int16_t read(std::ifstream& fp) {
+        auto serialize = [](T value) -> T {
+            union {T value; uint8_t bytes[sizeof(T)];} t{};
             t.value = value;
             std::reverse(t.bytes, t.bytes + sizeof(T));
             return t.value;
         };
 
-        T t_value = 0;
-
         if (fp.good() && !fp.eof()) {
-            size_t column_count = 0;
-            std::vector<T> row_data;
-
-            while (fp.read(reinterpret_cast<char*>(&t_value), sizeof(T))) {
-                row_data.push_back(serialize(t_value));
-                column_count++;
-
-                if (column_count == this->type.ncols) {
-                    this->data.push_back(row_data);
-                    column_count = 0;
-                    row_data.clear();
-                }
+            while (fp.peek() != std::ifstream::traits_type::eof()) {
+                T x;
+                T y;
+                T z;
+                fp.read(reinterpret_cast<char*>(&x), sizeof(T));
+                fp.read(reinterpret_cast<char*>(&y), sizeof(T));
+                fp.read(reinterpret_cast<char*>(&z), sizeof(T));
+                x = serialize(x);
+                y = serialize(y);
+                z = serialize(z);
+                Index rc = this->index(x, y);
+                size_t r = static_cast<size_t>(rc.row);
+                size_t c = static_cast<size_t>(rc.column);
+                //std::cout << x << ' ' << y << ' ' << z << ' ' << this->data.size() << ' ' << rc.row << ' ' << rc.column << '\n';
+                this->data[r][c] = z;
             }
         } else {
             fp.close();
@@ -168,15 +170,15 @@ private:
 
 
     Index index(float x, float y) {
-        float dem_y_index = 0, dem_x_index = 0;
+        int32_t dem_y_index = 0, dem_x_index = 0;
 
         if (this->bounds.within(x, y)) {
-            dem_y_index = (y - this->bounds.SW.y) / this->type.cellsize;
-            dem_x_index = (x - this->bounds.SW.x) / this->type.cellsize;
+            dem_y_index = std::floor((y - this->bounds.SW.y) / this->type.cellsize);
+            dem_x_index = std::floor((x - this->bounds.SW.x) / this->type.cellsize);
         } else {
             return {
-                static_cast<float>(this->type.nodata),
-                static_cast<float>(this->type.nodata)
+                static_cast<int32_t>(this->type.nodata),
+                static_cast<int32_t>(this->type.nodata)
             };
         }
 
@@ -189,8 +191,10 @@ private:
 
 public:
     struct Type {
-        size_t nrows;       // no. of DEM values available in row
-        size_t ncols;       // no. of DEM values available in column
+        size_t nrows; // no. of DEM values available in row
+        size_t ncols; // no. of DEM values available in column
+        float y_height; // total height of y
+        float x_height; // total height of x
         float yllcorner;    // bottom left y
         float xllcorner;    // bottom left x
         float cellsize;     // distance (in feet) between every DEM values
@@ -199,22 +203,26 @@ public:
         Type()
             : nrows(0),
             ncols(0),
+            y_height(0),
+            x_height(0),
             yllcorner(0),
             xllcorner(0),
             cellsize(0),
             nodata(0)
         {};
 
-        Type (size_t nrows, size_t ncols, float yllcorner, float xllcorner, float cellsize, T nodata)
-            : nrows(nrows),
-            ncols(ncols),
+        Type (float y_height, float x_height, float yllcorner, float xllcorner, float cellsize, T nodata)
+            : y_height(y_height),
+            x_height(x_height),
             yllcorner(yllcorner),
             xllcorner(xllcorner),
             cellsize(cellsize),
             nodata(nodata)
          {
-            if (nrows == 0 || ncols == 0) {
-                throw std::runtime_error("invalid data dimensions, nrows = 0 & ncols = 0");
+            nrows = std::ceil(y_height / cellsize) + 1;
+            ncols = std::ceil(x_height / cellsize) + 1;
+            if (y_height == 0 || x_height == 0) {
+                throw std::runtime_error("invalid data dimensions, y_height = 0 & x_height = 0");
             }
         };
 
@@ -234,18 +242,19 @@ public:
     DEM() = default;
 
 
-    DEM(const Type& type, std::ifstream fp) {
+    DEM(const Type& type, std::ifstream& fp) {
         this->type = type;
         this->bounds = {
-            {this->type.yllcorner + (this->type.cellsize * this->type.nrows), this->type.xllcorner},
-            {this->type.yllcorner + (this->type.cellsize * this->type.nrows), this->type.xllcorner + (this->type.cellsize * this->type.ncols)},
-            {this->type.yllcorner, this->type.xllcorner},
-            {this->type.yllcorner, this->type.xllcorner + (this->type.cellsize * this->type.ncols)}
+            {this->type.xllcorner, this->type.yllcorner + this->type.y_height},
+            {this->type.xllcorner + this->type.x_height, this->type.yllcorner + this->type.y_height},
+            {this->type.xllcorner, this->type.yllcorner},
+            {this->type.xllcorner + this->type.x_height, this->type.yllcorner}
         };
 
+        this->data = std::vector<std::vector<T>>(this->type.nrows, std::vector<T>(this->type.ncols, this->type.nodata));
         // read the DEM file (sets: this->data)
         if (this->read(fp) != EXIT_SUCCESS) {
-            std::string e = "failed to read DEM data from '" + filepath.string() + "'";
+            std::string e = "failed to read DEM data from fp";
             throw std::runtime_error(e);
         }
     };
