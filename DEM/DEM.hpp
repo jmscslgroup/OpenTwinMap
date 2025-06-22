@@ -53,17 +53,20 @@ Email: william.a.richardson@vanderbilt.edu
 #include <vector>
 #include <system_error>
 
+double clip(const double& n, const double& lower, const double& upper) {
+    return std::max(lower, std::min(n, upper));
+}
 
 struct Coordinate {
-    float x;
-    float y;
+    double x;
+    double y;
 
     Coordinate()
         : x(0),
         y(0)
     {};
 
-    Coordinate(float x, float y)
+    Coordinate(double x, double y)
         : x(x),
         y(y)
     {};
@@ -109,14 +112,13 @@ struct Bounds {
     Bounds& operator=(Bounds&& o) noexcept = default;
     ~Bounds() = default;
 
-    bool within(float x, float y) {
-        //std::cout << x << ' ' << y << ' ' << this->SW.x << ' ' << this->SW.y << ' ' << this->NW.x << ' ' << this->NW.y << ' ' << this->SE.x << ' ' << this->SE.y << ' ' << this->NE.x << ' ' << this->NE.y << '\n';
-        //std::cout << x - this->SW.x << ' ' << y - this->SW.y << ' ' << this->NE.y - y << '\n';
+    bool within(double x, double y) {
+        double eps = 1e-2;
         if (
-            y >= this->SW.y
-            && y <= this->NE.y
-            && x >= this->SW.x
-            && x <= this->NE.x
+            y >= (this->SW.y - eps)
+            && y <= (this->NE.y + eps)
+            && x >= (this->SW.x - eps)
+            && x <= (this->NE.x + eps)
         ) {
             return true;
         } else {
@@ -134,8 +136,8 @@ private:
     };
 
     struct Interpolated_Index {
-        float row;
-        float column;
+        double row;
+        double column;
     };
 
 
@@ -161,7 +163,6 @@ private:
                 Index rc = this->index(x, y);
                 size_t r = static_cast<size_t>(rc.row);
                 size_t c = static_cast<size_t>(rc.column);
-                //std::cout << x << ' ' << y << ' ' << z << ' ' << this->data.size() << ' ' << rc.row << ' ' << rc.column << '\n';
                 this->data[r][c] = z;
             }
         } else {
@@ -174,13 +175,20 @@ private:
     };
 
 
-    Index index(float x, float y) {
+    Index index(double x, double y) {
         int32_t dem_y_index = 0, dem_x_index = 0;
 
         if (this->bounds.within(x, y)) {
             dem_y_index = std::floor((y - this->bounds.SW.y) / this->type.cellsize);
             dem_x_index = std::floor((x - this->bounds.SW.x) / this->type.cellsize);
         } else {
+            std::cout << "Was given a bad index!" << std::endl;
+            std::cout << std::setprecision(15) << y << std::endl;
+            std::cout << std::setprecision(15) << x << std::endl;
+            std::cout << std::setprecision(15) << this->bounds.SW.y << std::endl;
+            std::cout << std::setprecision(15) << this->bounds.SW.x << std::endl;
+            std::cout << std::setprecision(15) << this->bounds.NE.y << std::endl;
+            std::cout << std::setprecision(15) << this->bounds.NE.x << std::endl;
             return {
                 static_cast<int32_t>(this->type.nodata),
                 static_cast<int32_t>(this->type.nodata)
@@ -193,16 +201,18 @@ private:
         };
     };
 
-    Interpolated_Index interpolated_index(float x, float y) {
-        float dem_y_index = 0, dem_x_index = 0;
+    Interpolated_Index interpolated_index(double x, double y) {
+        double dem_y_index = 0, dem_x_index = 0;
 
         if (this->bounds.within(x, y)) {
-            dem_y_index = ((y - this->bounds.SW.y) / this->type.cellsize);
-            dem_x_index = ((x - this->bounds.SW.x) / this->type.cellsize);
+            double nrows = static_cast<double>(this->type.nrows);
+            double ncols = static_cast<double>(this->type.ncols);
+            dem_y_index = std::max(0.0, std::min((y - this->bounds.SW.y + (this->type.cellsize / 2.0)) / this->type.cellsize, nrows-1));
+            dem_x_index = std::max(0.0, std::min((x - this->bounds.SW.x + (this->type.cellsize / 2.0)) / this->type.cellsize, ncols-1));
         } else {
             return {
-                static_cast<float>(this->type.nodata),
-                static_cast<float>(this->type.nodata)
+                static_cast<double>(this->type.nodata),
+                static_cast<double>(this->type.nodata)
             };
         }
 
@@ -212,16 +222,15 @@ private:
         };
     };
 
-
 public:
     struct Type {
         size_t nrows; // no. of DEM values available in row
         size_t ncols; // no. of DEM values available in column
-        float y_height; // total height of y
-        float x_height; // total height of x
-        float yllcorner;    // bottom left y
-        float xllcorner;    // bottom left x
-        float cellsize;     // distance (in feet) between every DEM values
+        double y_height; // total height of y
+        double x_height; // total height of x
+        double yllcorner;    // bottom left y
+        double xllcorner;    // bottom left x
+        double cellsize;     // distance (in feet) between every DEM values
         T nodata;           // invalid DEM value representation
 
         Type()
@@ -235,7 +244,7 @@ public:
             nodata(0)
         {};
 
-        Type (float y_height, float x_height, float yllcorner, float xllcorner, float cellsize, T nodata)
+        Type (double y_height, double x_height, double yllcorner, double xllcorner, double cellsize, T nodata)
             : y_height(y_height),
             x_height(x_height),
             yllcorner(yllcorner),
@@ -269,10 +278,10 @@ public:
     DEM(const Type& type, std::ifstream& fp) {
         this->type = type;
         this->bounds = {
-            {this->type.xllcorner, this->type.yllcorner + this->type.y_height},
-            {this->type.xllcorner + this->type.x_height, this->type.yllcorner + this->type.y_height},
-            {this->type.xllcorner, this->type.yllcorner},
-            {this->type.xllcorner + this->type.x_height, this->type.yllcorner}
+            {this->type.xllcorner - (this->type.cellsize / 2.0), this->type.yllcorner + this->type.y_height + (this->type.cellsize / 2.0)},
+            {this->type.xllcorner + this->type.x_height + (this->type.cellsize / 2.0), this->type.yllcorner + this->type.y_height + (this->type.cellsize / 2.0)},
+            {this->type.xllcorner - (this->type.cellsize / 2.0), this->type.yllcorner - (this->type.cellsize / 2.0)},
+            {this->type.xllcorner + this->type.x_height + (this->type.cellsize / 2), this->type.yllcorner - (this->type.cellsize / 2.0)}
         };
 
         this->data = std::vector<std::vector<T>>(this->type.nrows, std::vector<T>(this->type.ncols, this->type.nodata));
@@ -291,7 +300,7 @@ public:
     ~DEM() = default;
 
 
-    T altitude(float x, float y) {
+    T altitude(double x, double y) {
         Index rc = this->index(x, y);
 
         if (rc.row == this->type.nodata || rc.column == this->type.nodata) {
@@ -310,26 +319,39 @@ public:
     };
 
 
-    float interpolated_altitude(float x, float y) {
+    double interpolated_altitude(double x, double y, bool print=false) {
         Interpolated_Index rc = this->interpolated_index(x, y);
 
         if (rc.row == this->type.nodata || rc.column == this->type.nodata) {
             return this->type.nodata;
         }
+        size_t r = static_cast<size_t>(clip(std::floor(rc.row), 0.0, static_cast<double>(this->type.nrows-1)));
+        size_t c = static_cast<size_t>(clip(std::floor(rc.column), 0.0, static_cast<double>(this->type.ncols-1)));
+        size_t next_r = static_cast<size_t>(clip(std::ceil(rc.row), 0.0, static_cast<double>(this->type.nrows-1)));
+        size_t next_c = static_cast<size_t>(clip(std::ceil(rc.column), 0.0, static_cast<double>(this->type.ncols-1)));
 
-        size_t r = static_cast<size_t>(rc.row);
-        size_t c = static_cast<size_t>(rc.column);
+        
+        double del_y = std::abs(rc.row - static_cast<double>(r));
+        double del_x = std::abs(rc.column - static_cast<double>(c));
+        
 
-        float del_y = std::min(static_cast<float>(rc.row), static_cast<float>(this->type.nrows-1)) - r;
-        float del_x = std::min(static_cast<float>(rc.column), static_cast<float>(this->type.ncols-1)) - c;
-
-        size_t next_r = (r == this->type.nrows-1) ? r : r + 1;
-        size_t next_c = (c == this->type.ncols-1) ? c : c + 1;
-
-        float altitude =   (1-del_y) * (1-del_x) * this->data[r][c] +
+        double altitude =   (1-del_y) * (1-del_x) * this->data[r][c] +
                             del_x * (1-del_y) * this->data[r][next_c] +
                             (1-del_x) * del_y * this->data[next_r][c] +
                             del_y * del_x * this->data[next_r][next_c];
+
+        if (print) {
+            std::cout << r << std::endl;
+            std::cout << c << std::endl;
+            std::cout << next_r << std::endl;
+            std::cout << next_c << std::endl;
+            std::cout << this->data[r][c] << std::endl;
+            std::cout << this->data[r][next_c] << std::endl;
+            std::cout << this->data[next_r][c] << std::endl;
+            std::cout << this->data[next_r][next_c] << std::endl;
+            std::cout << del_y << std::endl;
+            std::cout << del_x << std::endl;
+        }
 
         return altitude;
     };

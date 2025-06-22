@@ -11,10 +11,10 @@ int main() {
 	for (auto& [key, value] : data.items()) {
 		cout << key << '\n';
 		cout << "DEM PATH: " << value["DEM"]["path"] << '\n';
-		float dem_x_min = value["DEM"]["x"]["min"];
-		float dem_x_max = value["DEM"]["x"]["max"];
-		float dem_y_min = value["DEM"]["y"]["min"];
-		float dem_y_max = value["DEM"]["y"]["max"];
+		double dem_x_min = value["DEM"]["x"]["min"];
+		double dem_x_max = value["DEM"]["x"]["max"];
+		double dem_y_min = value["DEM"]["y"]["min"];
+		double dem_y_max = value["DEM"]["y"]["max"];
 		cout << "DEM X MIN AND MAX: " << dem_x_min << " " << dem_x_max << '\n';
 		cout << "DEM Y MIN AND MAX: " << dem_y_min << " " << dem_y_max << '\n';
 	}

@@ -39,7 +39,7 @@ class rNode:
         if substractMin is not None:
             self.x -= substractMin[0]
             self.y -= substractMin[2]
-        try: self.height = giveHeight(self.x, self.y, minRemoved=True)
+        try: self.height = giveHeight(self.x, self.y)
         except: self.height = 0.0
 
         self.Junction = ""
@@ -518,13 +518,10 @@ class OSMWay:
 
 
 #Cell
-def parseAll(pfad, bildpfad = None, minimumHeight = 0.0, maximumHeight = 100.0, curveRadius=8):
+def parseAll(pfad, dem = None, minimumHeight = 0.0, maximumHeight = 100.0, curveRadius=8):
     global topoParameter
     setHeights(minimumHeight, maximumHeight)
-    if bildpfad is not None:
-        topoParameter = convertTopoMap(bildpfad, pfad)
-    else:
-        topoParameter = convertTopoMap(None, pfad)
+    topoParameter = convertTopoMap(dem, pfad)
     #create rNodedict with counter
     for entity in parse_file(pfad):
         if isinstance(entity, Node):
@@ -549,11 +546,6 @@ def parseAll(pfad, bildpfad = None, minimumHeight = 0.0, maximumHeight = 100.0, 
         node.evaluateJunction2()
     for way in OSMWay.allWays.values():
         way.roadElements, way.elevationElements = createOSMWayNodeList2XODRRoadLine(way)
-    #for node in rNode.allrNodes.values():
-    #    node.createOpenDriveElements(r=curveRadius)
-    #    node.createOpenDriveLanesAndInternalRoadConnections()
-    #for node in rNode.allrNodes.values():
-    #    node.connectOpenDriveLanes()
 
 #Cell
 def createOSMWayNodeList2XODRRoadLine(way, maxerror=2.0):
@@ -569,17 +561,17 @@ def createOSMWayNodeList2XODRRoadLine(way, maxerror=2.0):
         #createEndCap
         createEndCap(way,[firstNode.x,firstNode.y],giveHeading(rNode.allrNodes[way.OSMNodes[1]].x,rNode.allrNodes[way.OSMNodes[1]].y,firstNode.x,firstNode.y),isStartPoint = True)
         #get the full node involved
-        Points.append([firstNode.x,firstNode.y, giveHeight(firstNode.x,firstNode.y,minRemoved = True)])
+        Points.append([firstNode.x,firstNode.y, giveHeight(firstNode.x,firstNode.y)])
     else: #firstnode is junction
         #get the relevant lastPoint as NodePoint
         x,y = firstNode.getRelevantLastPoint(way)
-        Points.append([x,y,giveHeight(x,y,minRemoved = True)])
+        Points.append([x,y,giveHeight(x,y)])
 
     #middle element:
     for nodeId in way.OSMNodes[1:-1]:
         node = rNode.allrNodes[nodeId]
         hdgs.append(giveHeading(Points[-1][0],Points[-1][1],node.x,node.y))
-        Points.append([node.x,node.y, giveHeight(node.x,node.y,minRemoved = True)])
+        Points.append([node.x,node.y, giveHeight(node.x,node.y)])
 
 
     #last element:
@@ -589,12 +581,12 @@ def createOSMWayNodeList2XODRRoadLine(way, maxerror=2.0):
         createEndCap(way,[lastNode.x,lastNode.y],giveHeading(Points[-1][0],Points[-1][1],lastNode.x,lastNode.y),isStartPoint = False)
         #get the full node involved
         hdgs.append(giveHeading(Points[-1][0],Points[-1][1],lastNode.x,lastNode.y))
-        Points.append([lastNode.x,lastNode.y, giveHeight(lastNode.x,lastNode.y,minRemoved = True)])
+        Points.append([lastNode.x,lastNode.y, giveHeight(lastNode.x,lastNode.y)])
 
     else: #lastnode is junction
         #get the relevant lastPoint as NodePoint
         x,y = lastNode.getRelevantLastPoint(way)
-        Points.append([x,y,giveHeight(x,y,minRemoved = True)])
+        Points.append([x,y,giveHeight(x,y)])
         hdgs.append(giveHeading(x,y,lastNode.x,lastNode.y))
 
     if len(Points) == 2:
@@ -615,66 +607,28 @@ def createOSMWayNodeList2XODRRoadLine(way, maxerror=2.0):
             else:
                 x1 = (x1+x2)/2.0
                 y1 = (y1+y2)/2.0
-                z1 = giveHeight(x1,y1,minRemoved=True)
+                z1 = giveHeight(x1,y1)
             if i == len(Points)-3:
                 pass
             else:
                 x3 = (x3+x2)/2.0
                 y3 = (y3+y2)/2.0
-                z3 = giveHeight(x3,y3,minRemoved=True)
+                z3 = giveHeight(x3,y3)
             #calculate the parameter
             xarc,yarc,xendline,yendline,curvature,length = getArcCurvatureAndLength(x1,y1,x3,y3,x2,y2, maxerror = maxerror, minradius = 0.5, iterations = 10)
 
             if distance(x1,y1,xarc,yarc) > 0.1:
                 RoadElements.append({"xstart":x1,"ystart":y1, "length":distance(x1,y1,xarc,yarc), "heading":hdgs[i], "curvature":0.0})
                 ElevationElements.append({"xstart":x1,"ystart":y1,"zstart":z1,
-                                          "steigung":(giveHeight(xarc,yarc,minRemoved=True)-z1)/distance(x1,y1,xarc,yarc),"length":distance(x1,y1,xarc,yarc)})
+                                          "steigung":(giveHeight(xarc,yarc)-z1)/distance(x1,y1,xarc,yarc),"length":distance(x1,y1,xarc,yarc)})
             RoadElements.append({"xstart":xarc,"ystart":yarc, "length":length, "heading":hdgs[i], "curvature":curvature})
-            ElevationElements.append({"xstart":xarc,"ystart":yarc,"zstart":giveHeight(xarc,yarc,minRemoved=True),
-                                      "steigung":(giveHeight(xendline,yendline,minRemoved=True)-giveHeight(xarc,yarc,minRemoved=True))/length,"length":length})
+            ElevationElements.append({"xstart":xarc,"ystart":yarc,"zstart":giveHeight(xarc,yarc),
+                                      "steigung":(giveHeight(xendline,yendline)-giveHeight(xarc,yarc))/length,"length":length})
             if distance(xendline,yendline,x3,y3) > 0.1:
                 RoadElements.append({"xstart":xendline,"ystart":yendline, "length":distance(xendline,yendline,x3,y3), "heading":giveHeading(xendline,yendline,x3,y3), "curvature":0.0})
-                ElevationElements.append({"xstart":xendline,"ystart":yendline,"zstart":giveHeight(xendline,yendline,minRemoved=True),
-                                          "steigung":(z3-giveHeight(xendline,yendline,minRemoved=True))/distance(xendline,yendline,x3,y3),"length":distance(xendline,yendline,x3,y3)})
-    #unite same curvatures
-    '''condensedSomething = True
-    while(condensedSomething):
-        CondensedRoadElements = RoadElements if len(RoadElements)==1 else []
-        CondensedElevationElements = ElevationElements if len(ElevationElements)==1 else []
-        condensedSomething = False
-        i = 0
-        while i < len(RoadElements)-1:
+                ElevationElements.append({"xstart":xendline,"ystart":yendline,"zstart":giveHeight(xendline,yendline),
+                                          "steigung":(z3-giveHeight(xendline,yendline))/distance(xendline,yendline,x3,y3),"length":distance(xendline,yendline,x3,y3)})
 
-            if abs(RoadElements[i]["curvature"] - RoadElements[i+1]["curvature"])*(RoadElements[i]["length"]+RoadElements[i+1]["length"])< 0.1 and abs(RoadElements[i]["curvature"] - RoadElements[i+1]["curvature"]) < 0.001:
-                condensedSomething = True
-                CondensedRoadElements.append({"xstart":RoadElements[i]["xstart"],"ystart":RoadElements[i]["ystart"],
-                                              "length":RoadElements[i]["length"]+RoadElements[i+1]["length"], "heading":RoadElements[i]["heading"], "curvature":RoadElements[i]["curvature"]})
-                i += 1
-                #print("Condensed something")
-            else:
-                CondensedRoadElements.append({"xstart":RoadElements[i]["xstart"],"ystart":RoadElements[i]["ystart"],
-                                              "length":RoadElements[i]["length"], "heading":RoadElements[i]["heading"], "curvature":RoadElements[i]["curvature"]})
-                if i == len(RoadElements)-2:
-                    CondensedRoadElements.append({"xstart":RoadElements[i+1]["xstart"],"ystart":RoadElements[i+1]["ystart"],
-                                              "length":RoadElements[i+1]["length"], "heading":RoadElements[i+1]["heading"], "curvature":RoadElements[i+1]["curvature"]})
-            i += 1
-        i = 0
-        while i < len(ElevationElements)-1:
-            if abs(ElevationElements[i]["steigung"]-ElevationElements[i+1]["steigung"])*(ElevationElements[i]["length"]+ElevationElements[i+1]["length"])<0.1 and abs(ElevationElements[i]["steigung"]-ElevationElements[i+1]["steigung"]) < 0.01:
-                condensedSomething = True
-                CondensedElevationElements.append({"xstart":ElevationElements[i]["xstart"],"ystart":ElevationElements[i]["ystart"],"zstart":ElevationElements[i]["zstart"],
-                                          "steigung":ElevationElements[i]["steigung"],"length":ElevationElements[i]["length"]+ElevationElements[i+1]["length"]})
-                i += 1
-                #print("Condensed something")
-            else:
-                CondensedElevationElements.append({"xstart":ElevationElements[i]["xstart"],"ystart":ElevationElements[i]["ystart"],"zstart":ElevationElements[i]["zstart"],
-                                          "steigung":ElevationElements[i]["steigung"],"length":ElevationElements[i]["length"]})
-                if i == len(ElevationElements)-2:
-                    CondensedElevationElements.append({"xstart":ElevationElements[i+1]["xstart"],"ystart":ElevationElements[i+1]["ystart"],"zstart":ElevationElements[i+1]["zstart"],
-                                          "steigung":ElevationElements[i+1]["steigung"],"length":ElevationElements[i+1]["length"]})
-            i += 1
-        ElevationElements = CondensedElevationElements
-        RoadElements = CondensedRoadElements'''
     return RoadElements,ElevationElements
 
 #Cell
@@ -684,17 +638,17 @@ def createEndCap(way,point,hdg,isStartPoint = True):
     roadElevationElements = []
     #beginningArc
     roadLineElements.append({"xstart":point[0],"ystart":point[1], "length":lineDic["BeginningArcCurvatureLength"][1], "heading":hdg, "curvature":lineDic["BeginningArcCurvatureLength"][0]})
-    roadElevationElements.append({"xstart":point[0],"ystart":point[1],"zstart":giveHeight(point[0],point[1],minRemoved=True),
-                                      "steigung":(giveHeight(lineDic['ArcStartCoordinatesXY'][0],lineDic['ArcStartCoordinatesXY'][1],minRemoved=True)-giveHeight(point[0],point[1],minRemoved=True))/lineDic["BeginningArcCurvatureLength"][1],"length":lineDic["BeginningArcCurvatureLength"][1]})
+    roadElevationElements.append({"xstart":point[0],"ystart":point[1],"zstart":giveHeight(point[0],point[1]),
+                                      "steigung":(giveHeight(lineDic['ArcStartCoordinatesXY'][0],lineDic['ArcStartCoordinatesXY'][1])-giveHeight(point[0],point[1]))/lineDic["BeginningArcCurvatureLength"][1],"length":lineDic["BeginningArcCurvatureLength"][1]})
     #arc
     roadLineElements.append({"xstart":lineDic['ArcStartCoordinatesXY'][0],"ystart":lineDic['ArcStartCoordinatesXY'][1], "length":lineDic['ArcCurvatureLength'][1], "heading":lineDic['BeginningArcEndXYHdg'][2], "curvature":lineDic['ArcCurvatureLength'][0]})
-    roadElevationElements.append({"xstart":lineDic['ArcStartCoordinatesXY'][0],"ystart":lineDic['ArcStartCoordinatesXY'][1],"zstart":giveHeight(lineDic['ArcStartCoordinatesXY'][0],lineDic['ArcStartCoordinatesXY'][1],minRemoved=True),
-                                      "steigung":(giveHeight(lineDic['EndlineStartCoordinatesXY'][0],lineDic['EndlineStartCoordinatesXY'][1],minRemoved=True)-giveHeight(lineDic['ArcStartCoordinatesXY'][0],lineDic['ArcStartCoordinatesXY'][1],minRemoved=True))/lineDic["ArcCurvatureLength"][1],"length":lineDic["ArcCurvatureLength"][1]})
+    roadElevationElements.append({"xstart":lineDic['ArcStartCoordinatesXY'][0],"ystart":lineDic['ArcStartCoordinatesXY'][1],"zstart":giveHeight(lineDic['ArcStartCoordinatesXY'][0],lineDic['ArcStartCoordinatesXY'][1]),
+                                      "steigung":(giveHeight(lineDic['EndlineStartCoordinatesXY'][0],lineDic['EndlineStartCoordinatesXY'][1])-giveHeight(lineDic['ArcStartCoordinatesXY'][0],lineDic['ArcStartCoordinatesXY'][1]))/lineDic["ArcCurvatureLength"][1],"length":lineDic["ArcCurvatureLength"][1]})
 
     #endarc
     roadLineElements.append({"xstart":lineDic['EndArcBeginningXYHdgCurvatureLength'][0],"ystart":lineDic['EndArcBeginningXYHdgCurvatureLength'][1], "length":lineDic['EndArcBeginningXYHdgCurvatureLength'][4], "heading":lineDic['EndArcBeginningXYHdgCurvatureLength'][2], "curvature":lineDic['EndArcBeginningXYHdgCurvatureLength'][3]})
-    roadElevationElements.append({"xstart":lineDic['EndArcBeginningXYHdgCurvatureLength'][0],"ystart":lineDic['EndArcBeginningXYHdgCurvatureLength'][1],"zstart":giveHeight(lineDic['EndArcBeginningXYHdgCurvatureLength'][0],lineDic['EndArcBeginningXYHdgCurvatureLength'][1],minRemoved=True),
-                                      "steigung":(giveHeight(point[0],point[1],minRemoved=True)-giveHeight(lineDic['EndArcBeginningXYHdgCurvatureLength'][0],lineDic['EndArcBeginningXYHdgCurvatureLength'][1],minRemoved=True))/lineDic["EndArcBeginningXYHdgCurvatureLength"][4],"length":lineDic["EndArcBeginningXYHdgCurvatureLength"][4]})
+    roadElevationElements.append({"xstart":lineDic['EndArcBeginningXYHdgCurvatureLength'][0],"ystart":lineDic['EndArcBeginningXYHdgCurvatureLength'][1],"zstart":giveHeight(lineDic['EndArcBeginningXYHdgCurvatureLength'][0],lineDic['EndArcBeginningXYHdgCurvatureLength'][1]),
+                                      "steigung":(giveHeight(point[0],point[1])-giveHeight(lineDic['EndArcBeginningXYHdgCurvatureLength'][0],lineDic['EndArcBeginningXYHdgCurvatureLength'][1]))/lineDic["EndArcBeginningXYHdgCurvatureLength"][4],"length":lineDic["EndArcBeginningXYHdgCurvatureLength"][4]})
     OSMWayEndcap(way, roadLineElements, roadElevationElements, isStartPoint = isStartPoint)
 
 #Cell
@@ -786,18 +740,18 @@ def createOSMJunctionRoadLine(way1,way2,junctionNode, maxerror=2.0):
     xarc,yarc,xendline,yendline,curvature,length = getArcCurvatureAndLength(x1,y1,x3,y3,x2,y2, maxerror = 999999.9, minradius = 0.5, iterations = 10)
     RoadElements = [] #xstart,ystart, length, heading, curvature
     ElevationElements = []
-    z1 = giveHeight(x1,y1,minRemoved = True)
-    z2 = giveHeight(x2,y2,minRemoved = True)
-    z3 = giveHeight(x3,y3,minRemoved = True)
+    z1 = giveHeight(x1,y1)
+    z2 = giveHeight(x2,y2)
+    z3 = giveHeight(x3,y3)
     if distance(x1,y1,xarc,yarc) > 0.1:
                 RoadElements.append({"xstart":x1,"ystart":y1, "length":distance(x1,y1,xarc,yarc), "heading":giveHeading(x1,y1,x2,y2), "curvature":0.0})
                 ElevationElements.append({"xstart":x1,"ystart":y1,"zstart":z1,
-                                          "steigung":(giveHeight(xarc,yarc,minRemoved=True)-z1)/distance(x1,y1,xarc,yarc),"length":distance(x1,y1,xarc,yarc)})
+                                          "steigung":(giveHeight(xarc,yarc)-z1)/distance(x1,y1,xarc,yarc),"length":distance(x1,y1,xarc,yarc)})
     RoadElements.append({"xstart":xarc,"ystart":yarc, "length":length, "heading":giveHeading(x1,y1,x2,y2), "curvature":curvature})
-    ElevationElements.append({"xstart":xarc,"ystart":yarc,"zstart":giveHeight(xarc,yarc,minRemoved=True),
-                                      "steigung":(giveHeight(xendline,yendline,minRemoved=True)-giveHeight(xarc,yarc,minRemoved=True))/length,"length":length})
+    ElevationElements.append({"xstart":xarc,"ystart":yarc,"zstart":giveHeight(xarc,yarc),
+                                      "steigung":(giveHeight(xendline,yendline)-giveHeight(xarc,yarc))/length,"length":length})
     if distance(xendline,yendline,x3,y3) > 0.1:
                 RoadElements.append({"xstart":xendline,"ystart":yendline, "length":distance(xendline,yendline,x3,y3), "heading":giveHeading(xendline,yendline,x3,y3), "curvature":0.0})
-                ElevationElements.append({"xstart":xendline,"ystart":yendline,"zstart":giveHeight(xendline,yendline,minRemoved=True),
-                                          "steigung":(z3-giveHeight(xendline,yendline,minRemoved=True))/distance(xendline,yendline,x3,y3),"length":distance(xendline,yendline,x3,y3)})
+                ElevationElements.append({"xstart":xendline,"ystart":yendline,"zstart":giveHeight(xendline,yendline),
+                                          "steigung":(z3-giveHeight(xendline,yendline))/distance(xendline,yendline,x3,y3),"length":distance(xendline,yendline,x3,y3)})
     return RoadElements,ElevationElements

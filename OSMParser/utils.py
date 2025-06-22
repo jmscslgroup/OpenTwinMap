@@ -109,17 +109,11 @@ global topoParameter
 global topomap
 topomap = None
 topoParameter = None
-def convertTopoMap(topomappath, osmpath):
-        global topomap
+def convertTopoMap(dem, osmpath):
         global topoParameter
-        if topomappath is not None:
-                try:
-                        topomap =  np.array(Image.open(topomappath))[:,:,0] #y,x,rgba
-                except:
-                        topomap =  np.array(Image.open(topomappath))[:,:] #y,x,rgba
-                topomap=np.rot90(topomap)
-                topomap=np.rot90(topomap)
-        topoParameter = giveMaxMinLongLat(osmpath)
+        global topomap
+        topomap = dem
+        topoParameter = giveMaxMinLongLat(osmpath, True)
         return topoParameter
 
 global maximumheight, minimumheight
@@ -132,27 +126,15 @@ def setHeights(minimum, maximum):
 
 
 #Cell
-def giveHeight(x,y,minRemoved = True):
-                global topoParameter
-                global topomap
-                global maximumheight, minimumheight
-                if topomap is not None:
-                        if not minRemoved:
-                                x_lookup= int(topomap.shape[1]*(x-topoParameter[0])/(topoParameter[1]-topoParameter[0]))
-                                y_lookup = int(topomap.shape[0]*(1.0-(y-topoParameter[2])/(topoParameter[3]-topoParameter[2])))
-                        else:
-                                x_lookup= int(topomap.shape[1]*x/(topoParameter[1]-topoParameter[0]))
-                                y_lookup = int(topomap.shape[0]*(1.0-(y/(topoParameter[3]-topoParameter[2]))))
-                        x_lookup = min(max(topomap.shape[1]-x_lookup-1,0),topomap.shape[1]-1)
-                        y_lookup = min(max(topomap.shape[0]-1-y_lookup,0),topomap.shape[0]-1)
-                        height = topomap[y_lookup,x_lookup]-np.min(topomap)
-                        height = height/np.max(topomap)
-                        height = height * (maximumheight-minimumheight) + minimumheight
-                else:
-                        height = 0.0
-                return height
+def giveHeight(x,y):
+        global topomap
+        meters_to_feet = 3.28084
+        x = x * meters_to_feet
+        y = y * meters_to_feet
+        return topomap.altitude(x + topomap.x_origin, y + topomap.y_origin) / meters_to_feet
 
 #Cell
+'''
 def giveMaxMinLongLat(osmpath, trustOSMHeaderMinMax = False):
         global referenceLat
         global referenceLon
@@ -202,6 +184,25 @@ def giveMaxMinLongLat(osmpath, trustOSMHeaderMinMax = False):
         xmin,ymin = convertLongitudeLatitude(minlon,minlat)
         xmax,ymax = convertLongitudeLatitude(maxlon,maxlat)
         return xmin, xmax, ymin, ymax
+'''
+def giveMaxMinLongLat(osmpath, trust):
+        global referenceLat
+        global referenceLon
+        global transformer
+        minlat = 36.0658924703269
+        minlon = -86.6902731783606
+        maxlat = 36.0714441392433
+        maxlon = -86.6800752272334
+        if referenceLat is None:
+            referenceLat =  minlat
+            referenceLon = minlon
+        #initialize the projectionTransformer with the found referenceprojections
+        uproj = CRS.from_proj4("+proj=tmerc +lat_0={0} +lon_0={1} +x_0=0 +y_0=0 +ellps=GRS80 +units=m".format(referenceLat, referenceLon))
+        transformer = Transformer.from_crs(crs_4326, uproj)
+        
+        xmin,ymin = convertLongitudeLatitude(minlon,minlat)
+        xmax,ymax = convertLongitudeLatitude(maxlon,maxlat)
+        return xmin, xmax, ymin, ymax 
 
 
 #Cell
@@ -224,19 +225,6 @@ def distance(x1,y1,x2,y2):
 
 #Cell
 def schnittpunkt(x1,y1,hdg1,x2,y2,hdg2):
-    #x1 + np.cos(hdg1) * r1 = x2 + np.cos(hdg2) * r2 = x_s
-    #y1 + np.sin(hdg1) * r1 = y2 + np.sin(hdg2) * r2 = y_s
-
-    #r1 =   (x2-x2 + np.cos(hdg2) * r2) /(np.cos(hdg1))
-    #alt r1 = (y2-y1 + np.sin(hdg2) * r2) /(np.sin(hdg1))
-
-    #---> r2= (x1-x2 + np.cos(hdg1) * r1)/np.cos(hdg2)
-    #---> alt: r2= (y1 -y2+ np.sin(hdg1) * r1 )/np.sin(hdg2)
-    #r2 ersetzen
-    #y1 + np.sin(hdg1) * r1 = y2 + np.sin(hdg2) * (x1-x2 + np.cos(hdg1) * r1)/np.cos(hdg2)
-    #alt: x1 + np.cos(hdg1) * r1 = x2 + np.cos(hdg2) * (y1 -y2+ np.sin(hdg1) * r1 )/np.sin(hdg2)
-    #r1 ersetzen
-    #y1 + np.sin(hdg1) * (x2-x2 + np.cos(hdg2) * r2) /(np.cos(hdg1)) = y2 + np.sin(hdg2) * r2
     if abs(np.sin(hdg1) * np.cos(hdg2) - np.sin(hdg2) *np.cos(hdg1)) < 0.02:
         r2 = ( y1*np.cos(hdg1) + np.sin(hdg1) * (x2-x1)-y2*np.cos(hdg1)) /((np.sin(hdg2)*np.cos(hdg1) - np.sin(hdg1) *np.cos(hdg2) ))
         if abs(abs(hdg1) -np.pi/2.0) < 0.2:
