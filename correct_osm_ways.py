@@ -3,34 +3,20 @@ import open3d
 import pyproj
 import numpy as np
 import xml.etree.ElementTree as ET
+import joblib
+import time
+from scipy.signal import savgol_filter
 from copy import deepcopy
 from DEM_python import DEM
 
 meters_to_feet = 3.28084
 feet_to_meters = 1.0/meters_to_feet
-altitude_importance_factor = 1.0
 
-minlon=-86.69027
-minlat=36.06589 
-maxlon=-86.68008
-maxlat=36.07144
-proj = pyproj.Proj(proj="utm", zone=16, ellps="WGS84")
-inv_proj = pyproj.Proj(proj="utm", zone=16, ellps="WGS84", inverse=True)
-osm_origin_x, osm_origin_y = proj(minlon, minlat)
-
-print("Reading DEM")
-dem_data = DEM("148110.asc", 2.0, -999999)
-print("Reading PCD")
-pcd = open3d.io.read_point_cloud("148110.pcd")
-print("Postprocessing PCD")
-points = np.asarray(pcd.points)
-points *= feet_to_meters
-pcd.points = open3d.utility.Vector3dVector(points)
-pcd_origin_x, pcd_origin_y = pcd.get_min_bound()[0], pcd.get_min_bound()[1]
-pcd.translate((-pcd_origin_x, -pcd_origin_y, 0))
-points = np.asarray(pcd.points)
-points[:, 2] *= altitude_importance_factor
-pcd.points = open3d.utility.Vector3dVector(points)
+def MinHeightAtXY(dem, xy_coord, radius=1.0):
+    # Extract X, Y, Z
+    x, y = xy_coord
+    return dem.altitude(x * meters_to_feet, y * meters_to_feet) * feet_to_meters
+    #return float(np.min(nearby_z))
 
 def LidarGetAverageMeterSpacing(pcd):
     points = np.asarray(pcd.points)
@@ -40,7 +26,7 @@ def LidarGetAverageMeterSpacing(pcd):
     
     nn_dists = []
     for i in range(len(points)):
-        [_, idx, dist2] = pcd_tree.search_knn_vector_3d(points[i], 2)  # 2 nearest: itself + 1 neighbor
+        [_, idx, dist2] = pcd_tree.search_knn_vector_3d(points[i], 2)  # 2 nearest:  itself + 1 neighbor
         if len(dist2) > 1:
             nn_dists.append(np.sqrt(dist2[1]))  # exclude distance to self
     
@@ -74,53 +60,153 @@ def UpsampleLine(points, target_spacing):
 
     upsampled.append(points[-1])  # Always include last point
     return np.array(upsampled)
-'''
-def DownsampleLine(points, target_number):
-    """
-    Downsample the polyline to the original node number.
-    Input: points = (N, 2) or (N, 3) array
-    Output: (M, 3) array with interpolated points
-    """
-    points = np.array(points)
-    downsampled = []
-    step_amount = int(len(points) / target_number)
-    for i in range(target_number):
-        index = min(step_amount * i, len(points) - 1)
-        downsampled.append(points[index])
-    return np.array(downsampled)
-'''
+
 def DownsampleLine(points, target_number):
     indices = np.linspace(0, len(points) - 1, target_number, dtype=int)
     return points[indices]
 
-#lidar_spacing = LidarGetAverageMeterSpacing(pcd)
-lidar_spacing = 0.21
+def ExpandCenterlineToDenseRibbon(centerline_xyz, lanes=1, lane_width=3.65, width_resolution=0.21, length_resolution=0.21):
+    points = []
+    
+    for i in range(len(centerline_xyz) - 1):
+        p0 = centerline_xyz[i]
+        p1 = centerline_xyz[i + 1]
+
+        # Segment direction
+        direction = p1[:2] - p0[:2]
+        length = np.linalg.norm(direction)
+        if length == 0:
+            continue
+        direction /= length
+
+        # Perpendicular (2D) vector
+        perp = np.array([-direction[1], direction[0]])
+
+        # Number of samples
+        n_length = max(2, int(length / length_resolution))
+        n_width = max(2, int((lane_width * lanes) / width_resolution))
+
+        for j in range(n_length + 1):
+            alpha = j / n_length
+            point_center = (1 - alpha) * p0 + alpha * p1
+            z = point_center[2]
+
+            for k in range(-n_width // 2, n_width // 2 + 1):
+                offset = (k * width_resolution) * perp
+                x, y = point_center[:2] + offset
+                points.append([x, y, z])
+
+    return np.array(points)
+
+def SmoothSavgol(centerline_xyz, window_length=21, polyorder=2):
+    x = centerline_xyz[:, 0]
+    y = centerline_xyz[:, 1]
+    z = centerline_xyz[:, 2]
+    if (len(z) < window_length) or (np.isnan(z).any()):
+        return centerline_xyz  # not enough points to smooth
+
+    x_smooth = savgol_filter(x, window_length, polyorder)
+    y_smooth = savgol_filter(y, window_length, polyorder)
+    z_smooth = savgol_filter(z, window_length, polyorder)
+    smoothed = centerline_xyz.copy()
+    smoothed[:, 0] = x_smooth
+    smoothed[:, 1] = y_smooth
+    smoothed[:, 2] = z_smooth
+    return smoothed
+
+def processWayToLidar(wid, lane_count, lane_width, way_coordinates, lidar_spacing=0.21):
+    print("Reading DEM")
+    dem_data = DEM("SubsetSelection/dem_subset.csv", 2.0, -999999)
+    way_x_mean, way_y_mean, way_z_mean = np.mean(way_coordinates, axis=0)
+    for i in range(len(way_coordinates)):
+        way_current_height = MinHeightAtXY(dem_data, [way_coordinates[i][0], way_coordinates[i][1]])
+        way_coordinates[i][2] = way_current_height
+    print("Expanding.....")
+    expanded = ExpandCenterlineToDenseRibbon(way_coordinates, lanes=lane_count, lane_width=lane_width, width_resolution=lidar_spacing, length_resolution=lidar_spacing)
+    smoothed = SmoothSavgol(expanded)
+    print(wid)
+    if (str(wid) == "19447013") or (str(wid) == "108162374") or (str(wid) == "19468810") or (str(wid) == "611434838"):
+        adjusted_osm_points = open3d.geometry.PointCloud()
+        adjusted_osm_points.points = open3d.utility.Vector3dVector(expanded)
+        adjusted_osm_points.paint_uniform_color([0.1, 0.8, 0.1])  # greenish ribbon
+        open3d.visualization.draw_geometries([adjusted_osm_points])
+    del expanded
+    return smoothed 
+
+def processLidarCorrection(wid, osm_points):
+    pcd_points = open3d.io.read_point_cloud("SubsetSelection/lidar_subset_1m.pcd")
+    osm_process_points = open3d.geometry.PointCloud()
+    print(wid, " Point clouds created!")
+    #pcd_process_points.points = open3d.utility.Vector3dVector(pcd_points_numpy)
+    print(wid, " Point clouds points loaded!")
+    osm_process_points.points = open3d.utility.Vector3dVector(osm_points.copy())
+    print(wid, " OSM Point clouds points loaded!")
+    #pcd_process_points.normals = open3d.utility.Vector3dVector(pcd_normals_numpy)
+    print(wid, " Point clouds normals loaded!")
+    max_threshold = 5
+    fitness_desire = 0.8
+    transforms, fitnesses = [], []
+    print(wid, " ready!")
+    for i in range(max_threshold):
+        current_i = float(i + 1)
+        threshold = current_i  # distance threshold
+        reg_p2p = open3d.pipelines.registration.registration_icp(
+            osm_process_points, pcd_points, current_i,
+            np.eye(4),  # Initial guess
+            open3d.pipelines.registration.TransformationEstimationPointToPlane()
+        )
+        print(wid, " corrected!")
+        transform = reg_p2p.transformation
+        transforms.append(transform)
+        fitnesses.append(reg_p2p.fitness)
+        if (str(wid) == "19447013") or (str(wid) == "108162374") or (str(wid) == "19468810") or (str(wid) == "611434838"):
+            print(wid, current_i, transform, reg_p2p.fitness,  reg_p2p.inlier_rmse, getattr(reg_p2p, 'converged', 'unknown'))
+        if (reg_p2p.fitness > fitness_desire):
+            if (str(wid) == "19447013") or (str(wid) == "108162374") or (str(wid) == "19468810") or (str(wid) == "611434838"):
+                print("ACCEPTING MATCH: ", wid, current_i, transform, reg_p2p.fitness,  reg_p2p.inlier_rmse, getattr(reg_p2p, 'converged', 'unknown'))
+            return (transform, reg_p2p.fitness)
+        elif (current_i == (max_threshold - 1)):
+            if (str(wid) == "19447013") or (str(wid) == "108162374") or (str(wid) == "19468810") or (str(wid) == "611434838"):
+                print("Defaulting here: ", wid, current_i, transform, reg_p2p.fitness,  reg_p2p.inlier_rmse, getattr(reg_p2p, 'converged', 'unknown'))
+            return transforms[0], fitnesses[0]
 
 class WayNodeCollector(osmium.SimpleHandler):
     def __init__(self):
         super().__init__()
         self.nodes = {}  # id → (lat, lon)
         self.ways = {}
+        self.proj = pyproj.Proj(proj="utm", zone=16, ellps="WGS84")
 
     def node(self, n):
         coordinates = [n.location.lon, n.location.lat, 0]
         meters_coordinates = self.projectToMeters(coordinates)
-        coordinates[2] = dem_data.altitude(meters_coordinates[0] * meters_to_feet, meters_coordinates[1] * meters_to_feet) * feet_to_meters * altitude_importance_factor
+        #coordinates[2] = AverageHeightAtXY(coordinates[:2])
+        #coordinates[2] = dem_data.altitude(meters_coordinates[0] * meters_to_feet, meters_coordinates[1] * meters_to_feet) * feet_to_meters * altitude_importance_factor
         self.nodes[n.id] = {"coordinates": coordinates, "total_ways": [], "corrected_coordinates": np.array([0, 0, 0])}
         
     def way(self, w):
-        self.ways[w.id] = {"nodes": [], "corrected_node_positions": []}
-        for n in w.nodes:
-            self.ways[w.id]["nodes"].append(n.ref)
-            self.ways[w.id]["corrected_node_positions"].append(np.array([0, 0, 0])) # Default of zero coordinate
-            self.nodes[n.ref]["total_ways"].append(w.id)
+        if 'highway' in w.tags:
+            self.ways[w.id] = {"nodes": [], "corrected_node_positions": [], "lane_count": 0, "lane_width": 3.65}
+            for n in w.nodes:
+                self.ways[w.id]["nodes"].append(n.ref)
+                self.ways[w.id]["corrected_node_positions"].append(np.array([0, 0, 0])) # Default of zero coordinate
+                self.nodes[n.ref]["total_ways"].append(w.id)
+            lanes = w.tags.get('lanes')
+            if lanes is not None:
+                try:
+                    lane_count = int(lanes)
+                    self.ways[w.id]["lane_count"] = lane_count
+                except ValueError:
+                    self.ways[w.id]["lane_count"] = 1
+            else:
+                self.ways[w.id]["lane_count"] = 1
 
     def getWayNodes(self, wid):
         return self.ways[wid]["nodes"]
 
     def projectToMeters(self, coordinates):
         x, y, z = coordinates[0], coordinates[1], coordinates[2]
-        x, y = proj(x,y)
+        x, y = self.proj(x,y)
         x = x - osm_origin_x
         y = y - osm_origin_y
         return np.array([x, y, z])
@@ -130,7 +216,7 @@ class WayNodeCollector(osmium.SimpleHandler):
         #print("Starting projection ", x, y, z, osm_origin_x, osm_origin_y)
         x = x + osm_origin_x
         y = y + osm_origin_y
-        x, y = proj(x, y, inverse=True)
+        x, y = self.proj(x, y, inverse=True)
         #print("Final projection ", x, y, z)
         return np.array([x, y, z])
 
@@ -144,9 +230,6 @@ class WayNodeCollector(osmium.SimpleHandler):
                 x, y = meters[0], meters[1]
             result.append([x, y, z])
         return np.array(result)
-
-    def transformWayCoordinatesIntoLidarPoints(self, way_coordinates):
-        return UpsampleLine(way_coordinates, lidar_spacing)
 
     def annotateWayWithCorrectedPoints(self, wid, way_coordinates):
         for i in range(len(way_coordinates)):
@@ -171,58 +254,115 @@ class WayNodeCollector(osmium.SimpleHandler):
                 node["corrected_coordinates"] = node["coordinates"]
                 #node["corrected_coordinates"] = self.projectToOSM(self.projectToMeters(node["coordinates"]))
 
-# Load OSM
-print("Loading OSM")
-osm_file = "148110_full_corrected_2022.osm"
-handler = WayNodeCollector()
-handler.apply_file(osm_file)
+if __name__ == "__main__":
 
-# === Step 2: Convert lat/lon to ENU or UTM ===
-# Use pyproj to project into meters (UTM or local projection)
- # change zone as needed
-xyz = []
-ids = []
+    altitude_importance_factor = 1.0
+    temporary_pcd_points_file = "/dev/shm/alexr_pcd_lidar_points.dat"
+    temporary_pcd_normals_file = "/dev/shm/alexr_pcd_lidar_normals.dat"
 
-print("Lidar correction....")
-for wid, way_nodes in handler.ways.items():
-    way_nodes = handler.getWayNodes(wid)
-    print(wid, len(way_nodes))
-    way_coordinates = handler.getWayCoordinates(wid, project_to_meters=True)
-    way_lidar_points = handler.transformWayCoordinatesIntoLidarPoints(way_coordinates)
-    osm_points = open3d.geometry.PointCloud()
-    osm_points.points = open3d.utility.Vector3dVector(way_lidar_points)  # OSM centerline
-    threshold = 10.0  # distance threshold
-    reg_p2p = open3d.pipelines.registration.registration_icp(
-        osm_points, pcd, threshold,
-        np.eye(4),  # Initial guess
-        open3d.pipelines.registration.TransformationEstimationPointToPoint()
-    )
+    # minlat="36.04929259" minlon="-86.71072242" maxlat="36.08809402" maxlon="-86.64948975"
+    #minlon=-86.69027
+    #minlat=36.06589 
+    #maxlon=-86.68008
+    #maxlat=36.07144
+    minlon=-86.71072242
+    minlat=36.04929259
+    maxlon=-86.64948975
+    maxlat=36.08809402
     
-    #T = reg_p2p.transformation
-    #T_translation_only = np.eye(4)
-    #T_translation_only[:3, 3] = T[:3, 3]
-    adjusted_osm_points = open3d.geometry.PointCloud()
-    adjusted_osm_points.points = open3d.utility.Vector3dVector(way_coordinates)
-    adjusted_osm_points.transform(reg_p2p.transformation)
-    #osm_points.transform(T_translation_only)
-    osm_corrected_points = np.asarray(adjusted_osm_points.points)
-    print(reg_p2p.transformation)
-    handler.annotateWayWithCorrectedPoints(wid, osm_corrected_points)
+    handler = WayNodeCollector()
+    osm_origin_x, osm_origin_y = handler.proj(minlon, minlat)
 
-print("Correcting points.....")
-handler.correctNodePoints()
+    print("Reading PCD")
+    #pcd = open3d.io.read_point_cloud("SubsetSelection/lidar_subset.pcd")
+    print("Postprocessing PCD")
+    #pcd_points = np.asarray(pcd.points).astype(np.float32)
+    #pcd_normals = np.asarray(pcd.normals).astype(np.float32)
+    #pcd_points_shape = pcd_points.shape
+    #pcd_normals_shape = pcd_normals.shape
+    pcd_points_shape = (449707604, 3)
+    pcd_normals_shape = (449707604, 3)
 
-print("Writing new OSM")
-# Parse XML using ElementTree to directly update lat/lon
-tree = ET.parse(osm_file)
-root = tree.getroot()
 
-for elem in root.findall("node"):
-    nid = int(elem.attrib['id'])
-    if nid in handler.nodes:
-        lon, lat = handler.nodes[nid]["corrected_coordinates"][0], handler.nodes[nid]["corrected_coordinates"][1]
-        elem.set('lat', f"{lat:.8f}")
-        elem.set('lon', f"{lon:.8f}")
+    '''
+    points_memmap = np.memmap(temporary_pcd_points_file, dtype='float32', mode='w+', shape=pcd_points_shape)
+    points_memmap[:] = pcd_points[:]
+    points_memmap = np.ascontiguousarray(points_memmap)
+    points_memmap.flush()
 
-# Output file
-tree.write("148110_full_corrected_2022_lidar.osm", encoding="utf-8", xml_declaration=True)
+    normals_memmap = np.memmap(temporary_pcd_normals_file, dtype='float32', mode='w+', shape=pcd_normals_shape)
+    normals_memmap[:] = pcd_normals[:]
+    normals_memmap = np.ascontiguousarray(normals_memmap)
+    normals_memmap.flush()
+    del pcd_points
+    del pcd_normals
+    '''
+
+    # Load OSM
+    print("Loading OSM")
+    osm_file = "148110_full_corrected_2022.osm"
+    handler.apply_file(osm_file)
+
+    print("Lidar correction....")
+    way_lidar_results_info = []
+    way_corrections = []
+    way_correction_arguments = []
+    for wid, way_nodes in handler.ways.items():
+        way_nodes = handler.getWayNodes(wid)
+        way_coordinates = handler.getWayCoordinates(wid, project_to_meters=True)
+        lane_count = handler.ways[wid]["lane_count"]
+        lane_width = handler.ways[wid]["lane_width"]
+        way_lidar_results_info.append([wid, lane_count, lane_width, way_coordinates])
+
+    way_lidar_results = joblib.Parallel(n_jobs=16)(
+        joblib.delayed(processWayToLidar)(info[0], info[1], info[2], info[3]) for info in way_lidar_results_info
+    )
+
+    print("Ways processed!")
+
+    for i in range(len(way_lidar_results)):
+        wid, lane_count, lane_width, way_coordinates = way_lidar_results_info[i]
+        way_lidar_points = way_lidar_results[i]
+        way_corrections.append({"wid": wid, "way_coordinates": way_coordinates, "lane_count": lane_count, "lane_width": lane_width})
+        way_correction_arguments.append([way_lidar_points])
+
+    pcd_points = open3d.io.read_point_cloud("SubsetSelection/lidar_subset_1m.pcd")
+
+    correction_results = joblib.Parallel(n_jobs=16)(
+        joblib.delayed(processLidarCorrection)(way_corrections[i]["wid"], way_correction_arguments[i][0]) for i in range(len(way_correction_arguments))
+    )
+    #correction_results = [processLidarCorrection(pcd_points, way_corrections[i]["wid"], way_correction_arguments[i][0]) for i in range(len(way_correction_arguments))]
+
+    for i in range(len(way_corrections)):
+        wid = way_corrections[i]["wid"]
+        way_coordinates = way_corrections[i]["way_coordinates"]
+        adjusted_osm_points = open3d.geometry.PointCloud()
+        adjusted_osm_points.points = open3d.utility.Vector3dVector(way_coordinates)
+
+        original_transformation_matrix = correction_results[i][0]
+        original_transformation_matrix_fitness = correction_results[i][1]
+        default_transformation_matrix = np.eye(4)
+        if (original_transformation_matrix_fitness > 0.5):
+            adjusted_osm_points.transform(original_transformation_matrix)
+        else:
+            adjusted_osm_points.transform(default_transformation_matrix)
+        osm_corrected_points = np.asarray(adjusted_osm_points.points)
+        handler.annotateWayWithCorrectedPoints(wid, osm_corrected_points)
+
+    print("Correcting points.....")
+    handler.correctNodePoints()
+
+    print("Writing new OSM")
+    # Parse XML using ElementTree to directly update lat/lon
+    tree = ET.parse(osm_file)
+    root = tree.getroot()
+
+    for elem in root.findall("node"):
+        nid = int(elem.attrib['id'])
+        if nid in handler.nodes:
+            lon, lat = handler.nodes[nid]["corrected_coordinates"][0], handler.nodes[nid]["corrected_coordinates"][1]
+            elem.set('lat', f"{lat:.8f}")
+            elem.set('lon', f"{lon:.8f}")
+
+    # Output file
+    tree.write("148110_full_corrected_2022_lidar.osm", encoding="utf-8", xml_declaration=True)
