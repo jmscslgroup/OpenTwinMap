@@ -170,6 +170,75 @@ def processLidarCorrection(wid, osm_points):
                 print("Defaulting here: ", wid, current_i, transform, reg_p2p.fitness,  reg_p2p.inlier_rmse, getattr(reg_p2p, 'converged', 'unknown'))
             return transforms[0], fitnesses[0]
 
+def convertWaysToLidar(handler):
+    way_lidar_results_info = []
+    way_corrections = []
+    way_correction_arguments = []
+    for wid, way_nodes in handler.ways.items():
+        way_nodes = handler.getWayNodes(wid)
+        way_coordinates = handler.getWayCoordinates(wid, project_to_meters=True)
+        lane_count = handler.ways[wid]["lane_count"]
+        lane_width = handler.ways[wid]["lane_width"]
+        way_lidar_results_info.append([wid, lane_count, lane_width, way_coordinates])
+
+    way_lidar_results = joblib.Parallel(n_jobs=16)(
+        joblib.delayed(processWayToLidar)(info[0], info[1], info[2], info[3]) for info in way_lidar_results_info
+    )
+
+    print("Ways processed!")
+
+    for i in range(len(way_lidar_results)):
+        wid, lane_count, lane_width, way_coordinates = way_lidar_results_info[i]
+        way_lidar_points = way_lidar_results[i]
+        way_corrections.append({"wid": wid, "way_coordinates": way_coordinates, "lane_count": lane_count, "lane_width": lane_width})
+        way_correction_arguments.append([way_lidar_points])
+
+    return way_corrections, way_correction_arguments
+
+def correctWaysWithLidar(handler, way_corrections, way_correction_arguments):
+    #pcd_points = open3d.io.read_point_cloud("SubsetSelection/lidar_subset_1m.pcd")
+    pcd_points = open3d.io.read_point_cloud("1481110.pcd")
+    pcd.estimate_normals(search_param=open3d.geometry.KDTreeSearchParamKNN(knn=30))
+
+    correction_results = joblib.Parallel(n_jobs=16)(
+        joblib.delayed(processLidarCorrection)(way_corrections[i]["wid"], way_correction_arguments[i][0]) for i in range(len(way_correction_arguments))
+    )
+    #correction_results = [processLidarCorrection(pcd_points, way_corrections[i]["wid"], way_correction_arguments[i][0]) for i in range(len(way_correction_arguments))]
+
+    for i in range(len(way_corrections)):
+        wid = way_corrections[i]["wid"]
+        way_coordinates = way_corrections[i]["way_coordinates"]
+        adjusted_osm_points = open3d.geometry.PointCloud()
+        adjusted_osm_points.points = open3d.utility.Vector3dVector(way_coordinates)
+
+        original_transformation_matrix = correction_results[i][0]
+        original_transformation_matrix_fitness = correction_results[i][1]
+        default_transformation_matrix = np.eye(4)
+        if (original_transformation_matrix_fitness > 0.5):
+            adjusted_osm_points.transform(original_transformation_matrix)
+        else:
+            adjusted_osm_points.transform(default_transformation_matrix)
+        osm_corrected_points = np.asarray(adjusted_osm_points.points)
+        handler.annotateWayWithCorrectedPoints(wid, osm_corrected_points)
+    print("Correcting points.....")
+    handler.correctNodePoints()
+
+def createCorrectedOSMFile(handler, original_osm_file, target_osm_file):
+    # Parse XML using ElementTree to directly update lat/lon
+    tree = ET.parse(original_osm_file)
+    root = tree.getroot()
+
+    for elem in root.findall("node"):
+        nid = int(elem.attrib['id'])
+        if nid in handler.nodes:
+            lon, lat = handler.nodes[nid]["corrected_coordinates"][0], handler.nodes[nid]["corrected_coordinates"][1]
+            elem.set('lat', f"{lat:.8f}")
+            elem.set('lon', f"{lon:.8f}")
+
+    # Output file
+    tree.write(target_osm_file, encoding="utf-8", xml_declaration=True)
+
+
 class WayNodeCollector(osmium.SimpleHandler):
     def __init__(self):
         super().__init__()
@@ -256,19 +325,15 @@ class WayNodeCollector(osmium.SimpleHandler):
 
 if __name__ == "__main__":
 
-    altitude_importance_factor = 1.0
-    temporary_pcd_points_file = "/dev/shm/alexr_pcd_lidar_points.dat"
-    temporary_pcd_normals_file = "/dev/shm/alexr_pcd_lidar_normals.dat"
-
     # minlat="36.04929259" minlon="-86.71072242" maxlat="36.08809402" maxlon="-86.64948975"
-    #minlon=-86.69027
-    #minlat=36.06589 
-    #maxlon=-86.68008
-    #maxlat=36.07144
-    minlon=-86.71072242
-    minlat=36.04929259
-    maxlon=-86.64948975
-    maxlat=36.08809402
+    minlon=-86.69027
+    minlat=36.06589 
+    maxlon=-86.68008
+    maxlat=36.07144
+    #minlon=-86.71072242
+    #minlat=36.04929259
+    #maxlon=-86.64948975
+    #maxlat=36.08809402
     
     handler = WayNodeCollector()
     osm_origin_x, osm_origin_y = handler.proj(minlon, minlat)
@@ -280,89 +345,18 @@ if __name__ == "__main__":
     #pcd_normals = np.asarray(pcd.normals).astype(np.float32)
     #pcd_points_shape = pcd_points.shape
     #pcd_normals_shape = pcd_normals.shape
-    pcd_points_shape = (449707604, 3)
-    pcd_normals_shape = (449707604, 3)
-
-
-    '''
-    points_memmap = np.memmap(temporary_pcd_points_file, dtype='float32', mode='w+', shape=pcd_points_shape)
-    points_memmap[:] = pcd_points[:]
-    points_memmap = np.ascontiguousarray(points_memmap)
-    points_memmap.flush()
-
-    normals_memmap = np.memmap(temporary_pcd_normals_file, dtype='float32', mode='w+', shape=pcd_normals_shape)
-    normals_memmap[:] = pcd_normals[:]
-    normals_memmap = np.ascontiguousarray(normals_memmap)
-    normals_memmap.flush()
-    del pcd_points
-    del pcd_normals
-    '''
+    #pcd_points_shape = (449707604, 3)
+    #pcd_normals_shape = (449707604, 3)
 
     # Load OSM
     print("Loading OSM")
     osm_file = "148110_full_corrected_2022.osm"
+    target_osm_file = "148110_full_corrected_2022_lidar.osm"
     handler.apply_file(osm_file)
 
     print("Lidar correction....")
-    way_lidar_results_info = []
-    way_corrections = []
-    way_correction_arguments = []
-    for wid, way_nodes in handler.ways.items():
-        way_nodes = handler.getWayNodes(wid)
-        way_coordinates = handler.getWayCoordinates(wid, project_to_meters=True)
-        lane_count = handler.ways[wid]["lane_count"]
-        lane_width = handler.ways[wid]["lane_width"]
-        way_lidar_results_info.append([wid, lane_count, lane_width, way_coordinates])
-
-    way_lidar_results = joblib.Parallel(n_jobs=16)(
-        joblib.delayed(processWayToLidar)(info[0], info[1], info[2], info[3]) for info in way_lidar_results_info
-    )
-
-    print("Ways processed!")
-
-    for i in range(len(way_lidar_results)):
-        wid, lane_count, lane_width, way_coordinates = way_lidar_results_info[i]
-        way_lidar_points = way_lidar_results[i]
-        way_corrections.append({"wid": wid, "way_coordinates": way_coordinates, "lane_count": lane_count, "lane_width": lane_width})
-        way_correction_arguments.append([way_lidar_points])
-
-    pcd_points = open3d.io.read_point_cloud("SubsetSelection/lidar_subset_1m.pcd")
-
-    correction_results = joblib.Parallel(n_jobs=16)(
-        joblib.delayed(processLidarCorrection)(way_corrections[i]["wid"], way_correction_arguments[i][0]) for i in range(len(way_correction_arguments))
-    )
-    #correction_results = [processLidarCorrection(pcd_points, way_corrections[i]["wid"], way_correction_arguments[i][0]) for i in range(len(way_correction_arguments))]
-
-    for i in range(len(way_corrections)):
-        wid = way_corrections[i]["wid"]
-        way_coordinates = way_corrections[i]["way_coordinates"]
-        adjusted_osm_points = open3d.geometry.PointCloud()
-        adjusted_osm_points.points = open3d.utility.Vector3dVector(way_coordinates)
-
-        original_transformation_matrix = correction_results[i][0]
-        original_transformation_matrix_fitness = correction_results[i][1]
-        default_transformation_matrix = np.eye(4)
-        if (original_transformation_matrix_fitness > 0.5):
-            adjusted_osm_points.transform(original_transformation_matrix)
-        else:
-            adjusted_osm_points.transform(default_transformation_matrix)
-        osm_corrected_points = np.asarray(adjusted_osm_points.points)
-        handler.annotateWayWithCorrectedPoints(wid, osm_corrected_points)
-
-    print("Correcting points.....")
-    handler.correctNodePoints()
+    way_corrections, way_correction_arguments = convertWaysToLidar(handler)
+    correctWaysWithLidar(handler, way_corrections, way_correction_arguments)
 
     print("Writing new OSM")
-    # Parse XML using ElementTree to directly update lat/lon
-    tree = ET.parse(osm_file)
-    root = tree.getroot()
-
-    for elem in root.findall("node"):
-        nid = int(elem.attrib['id'])
-        if nid in handler.nodes:
-            lon, lat = handler.nodes[nid]["corrected_coordinates"][0], handler.nodes[nid]["corrected_coordinates"][1]
-            elem.set('lat', f"{lat:.8f}")
-            elem.set('lon', f"{lon:.8f}")
-
-    # Output file
-    tree.write("148110_full_corrected_2022_lidar.osm", encoding="utf-8", xml_declaration=True)
+    createCorrectedOSMFile(handler, osm_file, target_osm_file)
