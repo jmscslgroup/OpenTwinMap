@@ -32,38 +32,47 @@ def getCoordinatePairs(coordinates):
 			result = result + getCoordinatePairs(coordinates[i])
 		return result
 
+def getSouthWestCoordinate(coords):
+    min_lat = min(coord[1] for coord in coords)
+    candidates = [coord for coord in coords if coord[1] == min_lat]
+    southwest = min(candidates, key=lambda x: x[0])
+    return southwest
+
+def getNorthEastCoordinate(coords):
+    max_lat = max(coord[1] for coord in coords)
+    candidates = [coord for coord in coords if coord[1] == max_lat]
+    northeast = max(candidates, key=lambda x: x[0])
+    return northeast
+
 def getBoundingBox(metadata_entry):
-	try:
-		#geojson_coordinates = numpy.array(metadata_entry["GEOJSON"]["coordinates"]).reshape(-1, 2).tolist()
-		geojson_coordinates = getCoordinatePairs(metadata_entry["GEOJSON"]["coordinates"])
-		longitudes = [coordinate[0] for coordinate in geojson_coordinates]
-		latitudes = [coordinate[1] for coordinate in geojson_coordinates]
-		min_long = min(longitudes)
-		min_lat = min(latitudes)
-		max_long = max(longitudes)
-		max_lat = max(latitudes)
-		return [min_long, min_lat, max_long, max_lat]
-	except:
-		print(metadata_entry["GEOJSON"]["coordinates"])
-		raise Exception(str(metadata_entry["GEOJSON"]["coordinates"]))
+    try:
+        geojson_coordinates = getCoordinatePairs(metadata_entry["GEOJSON"]["coordinates"])
+        southwest = getSouthWestCoordinate(geojson_coordinates)
+        northeast = getNorthEastCoordinate(geojson_coordinates)
+        return [southwest[0], southwest[1], northeast[0], northeast[1]]
+    except:
+        print(metadata_entry["GEOJSON"]["coordinates"])
+        raise Exception(str(metadata_entry["GEOJSON"]["coordinates"]))
+
+def getEntryCoords(metadata_entry):
+    try:
+        #geojson_coordinates = numpy.array(metadata_entry["GEOJSON"]["coordinates"]).reshape(-1, 2).tolist()
+        geojson_coordinates = getCoordinatePairs(metadata_entry["GEOJSON"]["coordinates"])
+        return geojson_coordinates
+    except:
+        print(metadata_entry["GEOJSON"]["coordinates"])
+        raise Exception(str(metadata_entry["GEOJSON"]["coordinates"]))
 
 def getFinalOSMBound(metadata, tiles):
-    result = None
+    coords = []
     for tile in tiles:
         tile = str(tile)
-        bounding_box = getBoundingBox(metadata[tile])
-        if result is None:
-            result = bounding_box
-        else:
-            if (result[0] > bounding_box[0]):
-                result[0] = bounding_box[0]
-            if (result[1] > bounding_box[1]):
-                result[1] = bounding_box[1]
-            if (result[2] < bounding_box[2]):
-                result[2] = bounding_box[2]
-            if (result[3] < bounding_box[3]):
-                result[3] = bounding_box[3]
-    return result
+        coords += getEntryCoords(metadata[tile])
+    southwest = getSouthWestCoordinate(coords)
+    northeast = getNorthEastCoordinate(coords)
+    print("SW ", southwest)
+    print("NE ", northeast)
+    return [southwest[0], southwest[1], northeast[0], northeast[1]]
 
 def download_osm(metadata, tile):
     tile = str(tile)

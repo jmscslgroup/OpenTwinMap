@@ -48,9 +48,15 @@ def compile_subset():
     pcd.points = open3d.utility.Vector3dVector(points)
     pcd_origin_x, pcd_origin_y = pcd.get_min_bound()[0], pcd.get_min_bound()[1]
     pcd.translate((-pcd_origin_x, -pcd_origin_y, 0))
+    min_bound = pcd.get_min_bound()
+    max_bound = pcd.get_max_bound()
+    avg_bound = (min_bound + max_bound) / 2.0
+    max_height = 100000
 
     print("Computing normals....")
     pcd.estimate_normals(search_param=open3d.geometry.KDTreeSearchParamKNN(knn=30))
+    pcd.orient_normals_towards_camera_location(camera_location=(avg_bound[0], avg_bound[1], max_height))
+    pcd.normalize_normals()
 
     print("Writing to disk....")
     open3d.io.write_point_cloud(target_pcd, pcd)
