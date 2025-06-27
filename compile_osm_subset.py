@@ -1,12 +1,19 @@
 import os
 import subprocess
 import json
+import pyproj
 import xml.etree.ElementTree as ET
 from joblib import Parallel, delayed
 
 target_json = "./metadata.json"
 subset_json = "./compile_subset.json"
 subset_folder = "./SubsetSelection"
+
+feet_to_meters = 0.3048
+tiles_x = 3
+tiles_y = 3
+tile_width = 2000 * feet_to_meters
+tile_height = 3000 * feet_to_meters
 
 def get_metadata():
 	with open(target_json, "r") as f:
@@ -55,7 +62,7 @@ def getBoundingBox(metadata_entry):
         raise Exception(str(metadata_entry["GEOJSON"]["coordinates"]))
 
 def getEntryCoords(metadata_entry):
-    try:
+    try:o
         #geojson_coordinates = numpy.array(metadata_entry["GEOJSON"]["coordinates"]).reshape(-1, 2).tolist()
         geojson_coordinates = getCoordinatePairs(metadata_entry["GEOJSON"]["coordinates"])
         return geojson_coordinates
@@ -84,6 +91,8 @@ def download_osm(metadata, tile):
     print("Invoking ", "https://api.openstreetmap.org/api/0.6/map?bbox=")
     api_path = "https://api.openstreetmap.org/api/0.6/map?bbox={},{},{},{}".format(bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3])
     subprocess.run(["wget", "-O", osm_path, api_path], shell=False)
+
+def 
 
 if __name__ == "__main__":
     merged_osm_original = os.path.join(subset_folder, "osm_subset_merged.osm")
