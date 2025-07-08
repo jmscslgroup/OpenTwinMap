@@ -5,7 +5,7 @@ from joblib import Parallel, delayed
 
 GEOJSON_path = "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/2022_Davidson_County_QL1_Tile_Index.geojson"
 DEM_path = "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/DEM/Davidson_County_2022_QL1_DEM/Davidson_County_2022_QL1_DEM_tiles"
-LAZ_path = "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/PointCloud/Davidson_County_2022_QL1_laz/Davidson_County_2022_QL1_laz"
+LAZ_path = "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/PointCloud/Davidson_County_TN_2022_QL1_laz/Davidson_County_TN_2022_QL1_laz"
 OSM_path = "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/OSM"
 target_json = "./metadata.json"
 
@@ -26,12 +26,17 @@ GEOJSON_data = get_geojson_data()
 tile_list = get_all_tiles()
 
 def fetchDEMData(tile):
+	tif_path = os.path.join(DEM_path, tile + ".tif")
 	asc_path = os.path.join(DEM_path, tile + ".asc")
 	bin_path = os.path.join(DEM_path, tile + ".bin")
+	csv_path = os.path.join(DEM_path, tile + ".csv")
 	asc_data_loaded = pandas.read_csv(asc_path, names=["x", "y", "z"], sep=" ")
 	dem_metadata = {}
+	dem_metadata["path"] = tif_path
+	dem_metadata["tif_path"] = tif_path
 	dem_metadata["asc_path"] = asc_path
 	dem_metadata["bin_path"] = bin_path
+	dem_metadata["csv_path"] = csv_path
 	dem_metadata["x"] = {}
 	dem_metadata["y"] = {}
 	dem_metadata["z"] = {}
@@ -46,8 +51,13 @@ def fetchDEMData(tile):
 
 def fetchLAZData(tile):
 	laz_path = os.path.join(LAZ_path, tile + ".laz")
+	las_path = os.path.join(LAZ_path, tile + ".las")
+	pcd_path = os.path.join(LAZ_path, tile + ".pcd")
 	laz_metadata = {}
 	laz_metadata["path"] = laz_path
+	laz_metadata["laz_path"] = laz_path
+	laz_metadata["las_path"] = las_path
+	laz_metadata["pcd_path"] = pcd_path
 	
 	return laz_metadata
 	
@@ -78,6 +88,7 @@ if __name__ == "__main__":
 	parallel_result = Parallel(n_jobs=64, backend="multiprocessing")(delayed(fetchMetaData)(tile) for tile in tile_list)
 	for i in range(len(tile_list)):
 		json_result[tile_list[i]] = parallel_result[i]
+	json_result["selected_origin"] = "148110"
 	with open(target_json, "w+") as f:
 		json.dump(json_result, f, indent=8)
 	
