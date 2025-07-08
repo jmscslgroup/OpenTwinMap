@@ -2,6 +2,7 @@ import osmium
 import open3d
 import pyproj
 import numpy as np
+import math
 import xml.etree.ElementTree as ET
 import joblib
 import time
@@ -73,6 +74,7 @@ def DownsampleLine(points, target_number):
     indices = np.linspace(0, len(points) - 1, target_number, dtype=int)
     return points[indices]
 
+'''
 def ExpandCenterlineToDenseRibbon(centerline_xyz, lanes=1, lane_width=3.65, shoulder_width=0.0, width_resolution=0.21, length_resolution=0.21):
     points = []
     
@@ -93,6 +95,40 @@ def ExpandCenterlineToDenseRibbon(centerline_xyz, lanes=1, lane_width=3.65, shou
         # Number of samples
         n_length = max(2, int(length / length_resolution))
         n_width = max(2, int(((lane_width * lanes) + (2 * shoulder_width)) / width_resolution))
+
+        for j in range(n_length + 1):
+            alpha = j / n_length
+            point_center = (1 - alpha) * p0 + alpha * p1
+            z = point_center[2]
+
+            for k in range(-n_width // 2, n_width // 2 + 1):
+                offset = (k * width_resolution) * perp
+                x, y = point_center[:2] + offset
+                points.append([x, y, z])
+
+    return np.array(points)
+'''
+
+def ExpandCenterlineToDenseRibbon(centerline_xyz, lanes, lane_width, shoulder_width=1.8, width_resolution=0.21, length_resolution=0.21):
+    points = []
+    
+    for i in range(len(centerline_xyz) - 1):
+        p0 = centerline_xyz[i]
+        p1 = centerline_xyz[i + 1]
+
+        # Segment direction
+        direction = p1[:2] - p0[:2]
+        length = np.linalg.norm(direction)
+        if length == 0:
+            continue
+        direction /= length
+
+        # Perpendicular (2D) vector
+        perp = np.array([-direction[1], direction[0]])
+
+        # Number of samples
+        n_length = max(2, int(length / length_resolution))
+        n_width = max(2, int(((lane_width[i] * lanes[i]) + (2 * shoulder_width)) / width_resolution))
 
         for j in range(n_length + 1):
             alpha = j / n_length
@@ -138,7 +174,7 @@ def processWayToLidar(child_seed, dem_data, pcd_points_points, pcd_points_normal
     #print(wid)
     rng = np.random.default_rng(child_seed)
     #if (str(wid) == "19477386") or (str(wid) == "27925532") or (str(wid) == "108162489") or (str(wid) == "19447013") or (str(wid) == "108162374") or (str(wid) == "19468810") or (str(wid) == "611434838") or (str(wid) == "19442996") or (str(wid) == "108162489") or (str(wid) == "975552234"):
-    if (rng.integers(0,100) == 0):
+    if (rng.integers(0,500) == 0):
         adjusted_osm_points = open3d.geometry.PointCloud()
         adjusted_osm_points.points = open3d.utility.Vector3dVector(expanded)
         adjusted_osm_points.paint_uniform_color([0.8, 0.1, 0.1])  # greenish ribbon
@@ -159,8 +195,8 @@ def processLidarCorrection(child_seed, wid, osm_points, pcd_points_points, pcd_p
     pcd_points.normals = open3d.utility.Vector3dVector(pcd_points_normals.copy())
     osm_process_points = open3d.geometry.PointCloud()
     osm_process_points.points = open3d.utility.Vector3dVector(osm_points.copy())
-    thresholds = [0.3]
-    fitness_desire = 0.95
+    thresholds = [0.35]
+    fitness_desire = 0.99
     transforms, fitnesses, mse = [], [], []
     #print(wid, " ready!")
     rng = np.random.default_rng(child_seed)
@@ -177,7 +213,7 @@ def processLidarCorrection(child_seed, wid, osm_points, pcd_points_points, pcd_p
         rmse = reg_p2p.inlier_rmse
         
         #if (str(wid) == "19477386") or (str(wid) == "27925532") or (str(wid) == "108162489") or (str(wid) == "19447013") or (str(wid) == "108162374") or (str(wid) == "19468810") or (str(wid) == "611434838") or (str(wid) == "19442996") or (str(wid) == "108162489") or (str(wid) == "975552234"):
-        if (rng.integers(0,100) == 0):
+        if (rng.integers(0,500) == 0):
             print(wid, i, transform, fitness,  rmse, getattr(reg_p2p, 'converged', 'unknown'))
             adjusted_osm_points = open3d.geometry.PointCloud()
             adjusted_osm_points.points = open3d.utility.Vector3dVector(np.asarray(osm_process_points.points))
@@ -192,13 +228,17 @@ def processLidarCorrection(child_seed, wid, osm_points, pcd_points_points, pcd_p
         return (transforms[best_index], fitnesses[best_index])
     return (np.eye(4), 0.0)
 
-def ClipPCD(pcd, bottom_left, top_right, margins=0.0):
+def ClipPCD(pcd, bottom_left, top_right, margins=0.0, downscale=True):
     bottom_left[0] -= margins
     bottom_left[1] -= margins
     top_right[0] += margins
     top_right[1] += margins
     aabb = open3d.geometry.AxisAlignedBoundingBox(bottom_left, top_right)
     cropped_pcd = pcd.crop(aabb)
+    if downscale:
+        cropped_pcd = cropped_pcd.voxel_down_sample(voxel_size=0.5)
+        cropped_pcd.estimate_normals(search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=10.0, max_nn=30))
+        cropped_pcd.normalize_normals()
     return cropped_pcd
 
 def convertWaysToLidar(handler, dem_data, pcd_points):
@@ -228,7 +268,7 @@ def convertWaysToLidar(handler, dem_data, pcd_points):
         way_bounding_box_feet[1][1] += ((dem_y_origin - pcd_origin_y) * meters_to_feet)
         lane_count = handler.ways[wid]["lane_count"]
         lane_width = handler.ways[wid]["lane_width"]
-        margins = 5.0
+        margins = (np.max(lane_count) * np.max(lane_width)) + 3.0
         clipped_dem_data = DEM.clip_dem(dem_data, way_bounding_box_feet[0], way_bounding_box_feet[1], margins=margins*meters_to_feet)
         clipped_pcd = ClipPCD(pcd_points, way_bounding_box_meters[0], way_bounding_box_meters[1], margins=margins)
         clipped_pcd_points = np.asarray(clipped_pcd.points)
@@ -255,7 +295,7 @@ def correctWaysWithLidar(handler, dem, way_corrections, way_correction_arguments
     ss = np.random.SeedSequence(2024)
     child_seeds = ss.spawn(len(way_correction_arguments))
 
-    correction_results = list(tqdm(joblib.Parallel(return_as="generator", n_jobs=48)(
+    correction_results = list(tqdm(joblib.Parallel(return_as="generator", n_jobs=32)(
         joblib.delayed(processLidarCorrection)(child_seed, way_corrections[i]["wid"], way_correction_arguments[i][0], way_correction_arguments[i][1], way_correction_arguments[i][2]) for child_seed, i in zip(child_seeds, range(len(way_correction_arguments)))
     ), total=len(way_correction_arguments)))
     #correction_results = [processLidarCorrection(pcd_points, way_corrections[i]["wid"], way_correction_arguments[i][0]) for i in range(len(way_correction_arguments))]
@@ -338,7 +378,7 @@ class WayNodeCollector(osmium.SimpleHandler):
         meters_coordinates = self.projectToMeters(coordinates)
         #coordinates[2] = AverageHeightAtXY(coordinates[:2])
         #coordinates[2] = dem_data.altitude(meters_coordinates[0] * meters_to_feet, meters_coordinates[1] * meters_to_feet) * feet_to_meters * altitude_importance_factor
-        self.nodes[n_id] = {"coordinates": coordinates, "total_ways": [], "corrected_coordinates": np.array([0, 0, 0])}
+        self.nodes[n_id] = {"coordinates": coordinates, "meters_coordinates": meters_coordinates, "total_ways": [], "corrected_coordinates": np.array([0, 0, 0]), "lane_widths": [], "lane_counts": []}
         
     def way(self, w):
         #if (len(w.nodes) < 3):
@@ -356,28 +396,30 @@ class WayNodeCollector(osmium.SimpleHandler):
             }
             lane_type = w.tags['highway']
             lane_width = float(lane_width_by_highway[lane_type]) if lane_type in lane_width_by_highway else 3.65
-            self.ways_original[w_id] = {"nodes": [], "corrected_node_positions": [], "lane_count": 0, "lane_width": lane_width}
+            self.ways_original[w_id] = {"nodes": [], "corrected_node_positions": [], "lane_count": [], "lane_width": [lane_width for n in w.nodes]}
             nodes = []
+            lanes = w.tags.get('lanes')
+            if lanes is not None:
+                try:
+                    lane_count = int(lanes)
+                    self.ways_original[w_id]["lane_count"] = [lane_count for n in w.nodes]
+                except ValueError:
+                    self.ways_original[w_id]["lane_count"] = [1 for n in w.nodes]
+            else:
+                self.ways_original[w_id]["lane_count"] = [1 for n in w.nodes]
             for n in w.nodes:
                 n_ref = str(n.ref)
                 self.ways_original[w_id]["nodes"].append(n_ref)
                 self.ways_original[w_id]["corrected_node_positions"].append(np.array([0, 0, 0])) # Default of zero coordinate
                 self.nodes[n_ref]["total_ways"].append(w_id)
+                self.nodes[n_ref]["lane_counts"].append(self.ways_original[w_id]["lane_count"][0])
+                self.nodes[n_ref]["lane_widths"].append(lane_width)
                 nodes.append(n_ref)
             for node1, node2 in zip(nodes[:-1], nodes[1:]):
                 self.node_graph.add_edge(node1, node2)
-            lanes = w.tags.get('lanes')
-            if lanes is not None:
-                try:
-                    lane_count = int(lanes)
-                    self.ways_original[w_id]["lane_count"] = lane_count
-                except ValueError:
-                    self.ways_original[w_id]["lane_count"] = 1
-            else:
-                self.ways_original[w_id]["lane_count"] = 1
             self.ways[w_id] = self.ways_original[w_id].copy()
     
-    def generateImplicitWays(self, node_count=4):
+    def generateImplicitWays(self, node_count=15, distance_bound=125):
         all_segments = []
 
         def findPathsFromSource(node_graph, source, node_count):
@@ -391,23 +433,37 @@ class WayNodeCollector(osmium.SimpleHandler):
                         if path[0] < path[-1]:
                             segments.append(path)
             return segments
+
+        def getMinMaxMeterDistanceOfWay(segment):
+            x_points = []
+            y_points = []
+            for node in segment:
+                meters_coordinates = self.nodes[node]["meters_coordinates"]
+                x_points.append(meters_coordinates[0])
+                y_points.append(meters_coordinates[1])
+            x_min, x_max = min(x_points), max(x_points)
+            y_min, y_max = min(y_points), max(y_points)
+            return math.sqrt(math.pow(x_max - x_min, 2) + math.pow(y_max - y_min, 2))
+
         sources = self.node_graph.nodes
-        all_segments_lists = list(tqdm(joblib.Parallel(return_as="generator", n_jobs=32)(
+        all_segments_lists = list(tqdm(joblib.Parallel(return_as="generator", n_jobs=48)(
             joblib.delayed(findPathsFromSource)(self.node_graph, source, node_count) for source in sources
         ), total=len(sources)))
         all_segments = [item for sublist in all_segments_lists for item in sublist]
+        accepted_count = 0
         for segment in all_segments:
+            if (getMinMaxMeterDistanceOfWay(segment) > distance_bound):
+                continue
+            accepted_count += 1
             segment_hashes = [hashlib.sha256(node_id.encode()).hexdigest() for node_id in segment]
             segment_way_id = hashlib.sha256("".join(segment_hashes).encode()).hexdigest()
-            lane_type = "primary"
-            lane_width = 3.65
-            self.ways[segment_way_id] = {"nodes": [], "corrected_node_positions": [], "lane_count": 1, "lane_width": lane_width}
+            self.ways[segment_way_id] = {"nodes": [], "corrected_node_positions": [], "lane_count": [np.mean(self.nodes[node]["lane_counts"]) for node in segment], "lane_width": [np.mean(self.nodes[node]["lane_widths"]) for node in segment]}
             for node in segment:
                 self.ways[segment_way_id]["nodes"].append(node)
                 self.ways[segment_way_id]["corrected_node_positions"].append(np.array([0, 0, 0])) # Default of zero coordinate
                 self.nodes[node]["total_ways"].append(segment_way_id)
 
-        print(f"Found {len(all_segments)} unique segments of {node_count} nodes.")
+        print(f"Found {accepted_count} unique segments of {node_count} nodes.")
 
     def getWayNodes(self, wid):
         return self.ways[wid]["nodes"]
