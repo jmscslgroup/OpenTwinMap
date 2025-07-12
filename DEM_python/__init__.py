@@ -14,7 +14,7 @@ class DEM:
     # dem_y_max - dem_y_min, dem_x_max - dem_x_min, dem_y_min, dem_x_min, 2.0, -999999
     def __init__(self, data, grid_size, nodata_value):
         self.grid_size = grid_size
-        self.nodata_vlaue = nodata_value
+        self.nodata_value = nodata_value
         self.csv_data = data
         self.x_origin = self.csv_data.iloc[0].x
         self.y_origin = self.csv_data.iloc[0].y
@@ -35,6 +35,12 @@ class DEM:
     @classmethod
     def from_csv(cls, path, grid_size, nodata_value):
         csv_data = cls.load_csv_data(path)
+        return cls(csv_data, grid_size, nodata_value)
+
+    @classmethod
+    def from_dems(cls, dems, grid_size, nodata_value):
+        dem_series = [dem.csv_data for dem in dems]
+        csv_data = pandas.concat(dem_series, ignore_index=True).sort_values(by=["y", "x"], ascending=[True, True])
         return cls(csv_data, grid_size, nodata_value)
 
     @classmethod
@@ -63,7 +69,6 @@ class DEM:
             for i in range(bottom_x, top_x + 1):
                 indices.append(self._compute_dem_index(i, j))
         return indices
-
 
     def altitude(self, x, y):
         float_x = (x - self.x_origin) / self.grid_size

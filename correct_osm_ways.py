@@ -113,25 +113,37 @@ def SmoothSavgol(centerline_xyz, window_length=21, polyorder=3):
     smoothed[:, 2] = z_smooth
     return smoothed
 
-def visualizeWaysWithLidar(ways, ways_info, lidar):
+def visualizeWaysWithLidar(tdot_subset, cores=48):
+    pcd_points_list = tdot_subset.loadLAZs(tdot_subset.getAllTiles())
+    pcd_points = open3d.geometry.PointCloud()
+    for pcd in pcd_points_list:
+        pcd_points += pcd
+    pcd_points.paint_uniform_color([0.3, 0.3, 0.3])
+
+    ways_ribbon_arguments = []
+    for wid, way_nodes in tqdm(tdot_subset.osm_handler.ways.items()):
+        way_nodes = tdot_subset.osm_handler.getWayNodes(wid)
+        way_coordinates = tdot_subset.osm_handler.getWayCoordinates(wid, project_to_meters=True)
+        way_bounding_box_meters = tdot_subset.osm_handler.getWayBoundingBox(wid, project_to_meters=True)
+        lane_count = tdot_subset.osm_handler.ways[wid]["lane_count"]
+        lane_width = tdot_subset.osm_handler.ways[wid]["lane_width"]
+        arguments = [way_coordinates, way_bounding_box_meters, lane_count, lane_width]
+        ways_ribbon_arguments.append(arguments)
+
+    ways_ribbons = list(tqdm(joblib.Parallel(return_as="generator", n_jobs=cores)(
+        joblib.delayed(convertWaysToWaysRibbons)(tdot_subset, ways_ribbon_arguments[i][0], ways_ribbon_arguments[i][1], ways_ribbon_arguments[i][2], ways_ribbon_arguments[i][3]) for i in range(len(ways_ribbon_arguments))
+    ), total=len(ways_ribbon_arguments)))
+    
     ways_lidar_points = open3d.geometry.PointCloud()
-    for i in range(len(ways)):
+    for i in range(len(ways_ribbons)):
         new_point_cloud = open3d.geometry.PointCloud()
-        new_point_cloud.points = open3d.utility.Vector3dVector(ways_info[i][0])
+        new_point_cloud.points = open3d.utility.Vector3dVector(ways_ribbons[i])
         ways_lidar_points = ways_lidar_points + new_point_cloud
     ways_lidar_points.paint_uniform_color([0.8, 0.1, 0.1])  # redish ribbon
-    open3d.visualization.draw_geometries([ways_lidar_points, lidar])
+    open3d.visualization.draw_geometries([pcd_points, ways_lidar_points])
 
-def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bounding_box_meters, lane_count, lane_width):
+def convertWaysToWaysRibbons(tdot_subset, way_coordinates, way_bounding_box_meters, lane_count, lane_width):
     lidar_spacing = 0.21
-    rng = np.random.default_rng(child_seed)
-    #rng_generated = rng.integers(0, 1000)
-    rng_generated = 1
-
-    pcd_points = tdot_subset.loadLAZsFromBoundingBoxMeters(way_bounding_box_meters)
-    if (len(pcd_points.points) == 0):
-        print("No point cloud, returning identity")
-        return (np.eye(4), 0.0)
     
     dem_data = tdot_subset.loadDEMsFromBoundingBoxMeters(way_bounding_box_meters)
 
@@ -142,6 +154,20 @@ def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bo
     #print("Expanding.....")
     expanded = ExpandCenterlineToDenseRibbon(way_coordinates, lanes=lane_count, lane_width=lane_width, width_resolution=lidar_spacing, length_resolution=lidar_spacing)
     smoothed = SmoothSavgol(expanded)
+    return smoothed
+
+def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bounding_box_meters, lane_count, lane_width):
+    rng = np.random.default_rng(child_seed)
+    #rng_generated = rng.integers(0, 1000)
+    rng_generated = 1
+
+    pcd_points = tdot_subset.loadLAZsFromBoundingBoxMeters(way_bounding_box_meters)
+    if (len(pcd_points.points) == 0):
+        print("No point cloud, returning identity")
+        return (np.eye(4), 0.0)
+
+    smoothed = convertWaysToWaysRibbons(way_coordinates, way_bounding_box_meters, lane_count, lane_width)
+
     if (rng_generated == 0):
         adjusted_osm_points = open3d.geometry.PointCloud()
         adjusted_osm_points.points = open3d.utility.Vector3dVector(smoothed)

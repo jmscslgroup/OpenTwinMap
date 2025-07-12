@@ -282,6 +282,7 @@ class TDOTSubset:
     metadata_json = None
     meters_index = None
     coords_index = None
+    osm_path = None
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -310,10 +311,11 @@ class TDOTSubset:
         min_long, min_lat, max_long, max_lat = self.metadata_json["bounds"]["min_long"], self.metadata_json["bounds"]["min_lat"], self.metadata_json["bounds"]["max_long"], self.metadata_json["bounds"]["max_lat"]
         min_meters_x, min_meters_y, max_meters_x, max_meters_y = self.metadata_json["bounds"]["min_meters_x"], self.metadata_json["bounds"]["min_meters_y"], self.metadata_json["bounds"]["max_meters_x"], self.metadata_json["bounds"]["max_meters_y"]
         self.osm_handler = WayNodeCollector(min_long, min_lat, self)
-        osm_file_path = os.path.join(self.root_folder, "osm_subset.osm")
+        osm_file_path = self.getOSMPath()
         self.osm_handler.apply_file(osm_file_path)
 
-    def __init__(self, root_folder):
+    def __init__(self, root_folder, osm_path="osm_subset.osm"):
+        self.osm_path = osm_path
         self.root_folder = root_folder
         self.metadata_json = TDOTSubset.loadJson(self.getMetadataPath())
         self.proj = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:6576", always_xy=True)
@@ -332,14 +334,14 @@ class TDOTSubset:
         min_long, min_lat, max_long, max_lat = self.metadata_json["bounds"]["min_long"], self.metadata_json["bounds"]["min_lat"], self.metadata_json["bounds"]["max_long"], self.metadata_json["bounds"]["max_lat"]
         min_meters_x, min_meters_y, max_meters_x, max_meters_y = self.metadata_json["bounds"]["min_meters_x"], self.metadata_json["bounds"]["min_meters_y"], self.metadata_json["bounds"]["max_meters_x"], self.metadata_json["bounds"]["max_meters_y"]
         self.osm_handler = WayNodeCollector(min_long, min_lat, self)
-        osm_file_path = os.path.join(self.root_folder, "osm_subset.osm")
+        osm_file_path = self.getOSMPath()
         self.osm_handler.apply_file(osm_file_path)
 
     def getMetadataPath(self):
         return os.path.join(self.root_folder, "metadata.json")
 
     def getOSMPath(self):
-        return os.path.join(self.root_folder, "osm_subset.osm")
+        return os.path.join(self.root_folder, self.osm_path)
 
     def getDEMPath(self, tile):
         return os.path.join(self.root_folder, self.metadata_json["tiles"][tile]["DEM"]["path"])
@@ -362,7 +364,7 @@ class TDOTSubset:
         #pcd_points.points = open3d.utility.Vector3dVector(pcd_points_points)
         pcd_points.estimate_normals(search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=10.0, max_nn=30))
         pcd_points.normalize_normals()
-        pcd_points.paint_uniform_color([0.1, 0.1, 0.1])
+        pcd_points.paint_uniform_color([0.3, 0.3, 0.3])
         return pcd_points
 
     def loadLAZ(self, tile, process=False):
@@ -376,8 +378,8 @@ class TDOTSubset:
         dems = [self.loadDEM(tile) for tile in tiles]
         return DEM.from_dems(dems, 2.0, -999999)
 
-    def loadLAZs(self, tiles):
-        pcds = [self.loadLAZ(tile) for tile in tiles]
+    def loadLAZs(self, tiles, process=False):
+        pcds = [self.loadLAZ(tile, process) for tile in tiles]
         return pcds
 
     def convertToMeters(self, coord):
