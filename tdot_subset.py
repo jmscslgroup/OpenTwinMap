@@ -104,11 +104,12 @@ class WayNodeCollector(osmium.SimpleHandler):
         n_id = str(n.id)
         coordinates = [n.location.lon, n.location.lat, 0]
         meters_coordinates = self.projectToMeters(coordinates)
-        self.nodes[n_id] = {"coordinates": coordinates, "meters_coordinates": meters_coordinates, "total_ways": [], "corrected_coordinates": np.array([0, 0, 0]), "lane_widths": [], "lane_counts": []}
+        self.nodes[n_id] = {"coordinates": coordinates, "meters_coordinates": meters_coordinates, "total_ways": [], "corrected_coordinates": np.array([0, 0, 0]), "lane_widths": [], "lane_counts": [], "bridge": False}
         
     def way(self, w):
         w_id = str(w.id)
         if 'highway' in w.tags:
+            bridge = ("bridge" in w.tags) and (w.tags["bridge"] == "yes")
             lane_width_by_highway = {
                 'motorway': 3.75,
                 'motorway_link': 3.5,
@@ -121,6 +122,7 @@ class WayNodeCollector(osmium.SimpleHandler):
             lane_type = w.tags['highway']
             lane_width = float(lane_width_by_highway[lane_type]) if lane_type in lane_width_by_highway else 3.65
             self.ways_original[w_id] = {"nodes": [], "corrected_node_positions": [], "lane_count": [], "lane_width": [lane_width for n in w.nodes]}
+            self.ways_original[w_id]["bridge"] = [bridge for n in w.nodes]
             nodes = []
             lanes = w.tags.get('lanes')
             if lanes is not None:
@@ -138,12 +140,13 @@ class WayNodeCollector(osmium.SimpleHandler):
                 self.nodes[n_ref]["total_ways"].append(w_id)
                 self.nodes[n_ref]["lane_counts"].append(self.ways_original[w_id]["lane_count"][0])
                 self.nodes[n_ref]["lane_widths"].append(lane_width)
+                self.nodes[n_ref]["bridge"] = self.nodes[n_ref]["bridge"] or bridge
                 nodes.append(n_ref)
             for node1, node2 in zip(nodes[:-1], nodes[1:]):
                 self.node_graph.add_edge(node1, node2)
             self.ways[w_id] = self.ways_original[w_id].copy()
     
-    def generateImplicitWays(self, node_count=15, distance_bound=200, cores=48):
+    def generateImplicitWays(self, node_count=15, distance_bound=250, cores=48):
         all_segments = []
 
         def findPathsFromSource(node_graph, source, node_count):
@@ -181,7 +184,7 @@ class WayNodeCollector(osmium.SimpleHandler):
             accepted_count += 1
             segment_hashes = [hashlib.sha256(node_id.encode()).hexdigest() for node_id in segment]
             segment_way_id = hashlib.sha256("".join(segment_hashes).encode()).hexdigest()
-            self.ways[segment_way_id] = {"nodes": [], "corrected_node_positions": [], "lane_count": [np.mean(self.nodes[node]["lane_counts"]) for node in segment], "lane_width": [np.mean(self.nodes[node]["lane_widths"]) for node in segment]}
+            self.ways[segment_way_id] = {"nodes": [], "corrected_node_positions": [], "lane_count": [np.mean(self.nodes[node]["lane_counts"]) for node in segment], "lane_width": [np.mean(self.nodes[node]["lane_widths"]) for node in segment], "bridge": [self.nodes[node]["bridge"] for node in segment]}
             for node in segment:
                 self.ways[segment_way_id]["nodes"].append(node)
                 self.ways[segment_way_id]["corrected_node_positions"].append(np.array([0, 0, 0])) # Default of zero coordinate
@@ -254,7 +257,7 @@ class WayNodeCollector(osmium.SimpleHandler):
             else:
                 node["corrected_coordinates"] = node["coordinates"]
             corrected_coordinates_meters = self.projectToMeters(node["corrected_coordinates"])
-            node["corrected_coordinates"][2] = self.subset_parent.MinHeightAtXYMeters(dem, (corrected_coordinates_meters[0], corrected_coordinates_meters[1]))
+            #node["corrected_coordinates"][2] = self.subset_parent.MinHeightAtXYMeters(dem, (corrected_coordinates_meters[0], corrected_coordinates_meters[1]))
 
     def createCorrectedOSMFile(self, original_osm_file, target_osm_file):
         # Parse XML using ElementTree to directly update lat/lon
@@ -308,11 +311,6 @@ class TDOTSubset:
             coords_bbox = [coords_bounds["min"][0], coords_bounds["min"][1], coords_bounds["max"][0], coords_bounds["max"][1]]
             self.meters_index.insert(k_int, meters_bbox)
             self.coords_index.insert(k_int, coords_bbox)
-        min_long, min_lat, max_long, max_lat = self.metadata_json["bounds"]["min_long"], self.metadata_json["bounds"]["min_lat"], self.metadata_json["bounds"]["max_long"], self.metadata_json["bounds"]["max_lat"]
-        min_meters_x, min_meters_y, max_meters_x, max_meters_y = self.metadata_json["bounds"]["min_meters_x"], self.metadata_json["bounds"]["min_meters_y"], self.metadata_json["bounds"]["max_meters_x"], self.metadata_json["bounds"]["max_meters_y"]
-        self.osm_handler = WayNodeCollector(min_long, min_lat, self)
-        osm_file_path = self.getOSMPath()
-        self.osm_handler.apply_file(osm_file_path)
 
     def __init__(self, root_folder, osm_path="osm_subset.osm"):
         self.osm_path = osm_path
@@ -331,8 +329,9 @@ class TDOTSubset:
             coords_bbox = [coords_bounds["min"][0], coords_bounds["min"][1], coords_bounds["max"][0], coords_bounds["max"][1]]
             self.meters_index.insert(k_int, meters_bbox)
             self.coords_index.insert(k_int, coords_bbox)
+
+    def processOSM(self):
         min_long, min_lat, max_long, max_lat = self.metadata_json["bounds"]["min_long"], self.metadata_json["bounds"]["min_lat"], self.metadata_json["bounds"]["max_long"], self.metadata_json["bounds"]["max_lat"]
-        min_meters_x, min_meters_y, max_meters_x, max_meters_y = self.metadata_json["bounds"]["min_meters_x"], self.metadata_json["bounds"]["min_meters_y"], self.metadata_json["bounds"]["max_meters_x"], self.metadata_json["bounds"]["max_meters_y"]
         self.osm_handler = WayNodeCollector(min_long, min_lat, self)
         osm_file_path = self.getOSMPath()
         self.osm_handler.apply_file(osm_file_path)

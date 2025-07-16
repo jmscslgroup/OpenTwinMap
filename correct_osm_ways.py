@@ -142,7 +142,21 @@ def visualizeWaysWithLidar(tdot_subset, cores=48):
     ways_lidar_points.paint_uniform_color([0.8, 0.1, 0.1])  # redish ribbon
     open3d.visualization.draw_geometries([pcd_points, ways_lidar_points])
 
-def convertWaysToWaysRibbons(tdot_subset, way_coordinates, way_bounding_box_meters, lane_count, lane_width):
+def getNearestNonBridgeHeight(way_coordinates, bridge):
+    current_height = None
+    for i in range(len(bridge)):
+        if bridge[i] and (current_height is not None):
+            way_coordinates[i][2] = current_height
+        elif (not bridge[i]):
+            current_height = way_coordinates[i][2]
+    current_height = None
+    for i in range(len(bridge) - 1, -1, -1):
+        if bridge[i] and (current_height is not None):
+            way_coordinates[i][2] = current_height
+        elif (not bridge[i]):
+            current_height = way_coordinates[i][2]
+
+def convertWaysToWaysRibbons(tdot_subset, way_coordinates, way_bounding_box_meters, lane_count, lane_width, bridge):
     lidar_spacing = 0.21
     
     dem_data = tdot_subset.loadDEMsFromBoundingBoxMeters(way_bounding_box_meters)
@@ -151,12 +165,14 @@ def convertWaysToWaysRibbons(tdot_subset, way_coordinates, way_bounding_box_mete
     for i in range(len(way_coordinates)):
         way_current_height = tdot_subset.MinHeightAtXYMeters(dem_data, [way_coordinates[i][0], way_coordinates[i][1]])
         way_coordinates[i][2] = way_current_height
+    # Correcting for bridges
+    getNearestNonBridgeHeight(way_coordinates, bridge)
     #print("Expanding.....")
     expanded = ExpandCenterlineToDenseRibbon(way_coordinates, lanes=lane_count, lane_width=lane_width, width_resolution=lidar_spacing, length_resolution=lidar_spacing)
     smoothed = SmoothSavgol(expanded)
     return smoothed
 
-def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bounding_box_meters, lane_count, lane_width):
+def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bounding_box_meters, lane_count, lane_width, bridge):
     rng = np.random.default_rng(child_seed)
     #rng_generated = rng.integers(0, 1000)
     rng_generated = 1
@@ -164,9 +180,9 @@ def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bo
     pcd_points = tdot_subset.loadLAZsFromBoundingBoxMeters(way_bounding_box_meters)
     if (len(pcd_points.points) == 0):
         print("No point cloud, returning identity")
-        return (np.eye(4), 0.0)
+        return (np.eye(4), 0.0, way_coordinates)
 
-    smoothed = convertWaysToWaysRibbons(way_coordinates, way_bounding_box_meters, lane_count, lane_width)
+    smoothed = convertWaysToWaysRibbons(tdot_subset, way_coordinates, way_bounding_box_meters, lane_count, lane_width, bridge)
 
     if (rng_generated == 0):
         adjusted_osm_points = open3d.geometry.PointCloud()
@@ -203,8 +219,8 @@ def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bo
             mse.append(rmse)
     if (len(mse) > 0):
         best_index = np.argmin(mse)
-        return (transforms[best_index], fitnesses[best_index])
-    return (np.eye(4), 0.0)
+        return (transforms[best_index], fitnesses[best_index], way_coordinates)
+    return (np.eye(4), 0.0, way_coordinates)
 
 def correctWaysWithLidar(tdot_subset, cores=32):
     way_correction_arguments = []
@@ -214,7 +230,8 @@ def correctWaysWithLidar(tdot_subset, cores=32):
         way_bounding_box_meters = tdot_subset.osm_handler.getWayBoundingBox(wid, project_to_meters=True)
         lane_count = tdot_subset.osm_handler.ways[wid]["lane_count"]
         lane_width = tdot_subset.osm_handler.ways[wid]["lane_width"]
-        arguments = [wid, way_coordinates, way_bounding_box_meters, lane_count, lane_width]
+        bridge = tdot_subset.osm_handler.ways[wid]["bridge"]
+        arguments = [wid, way_coordinates, way_bounding_box_meters, lane_count, lane_width, bridge]
         #print(arguments)
         way_correction_arguments.append(arguments)
 
@@ -222,17 +239,17 @@ def correctWaysWithLidar(tdot_subset, cores=32):
     child_seeds = ss.spawn(len(way_correction_arguments))
 
     way_correction_results = list(tqdm(joblib.Parallel(return_as="generator", n_jobs=cores)(
-        joblib.delayed(processLidarCorrection)(child_seed, tdot_subset, way_correction_arguments[i][0], way_correction_arguments[i][1], way_correction_arguments[i][2], way_correction_arguments[i][3], way_correction_arguments[i][4]) for child_seed, i in zip(child_seeds, range(len(way_correction_arguments)))
+        joblib.delayed(processLidarCorrection)(child_seed, tdot_subset, way_correction_arguments[i][0], way_correction_arguments[i][1], way_correction_arguments[i][2], way_correction_arguments[i][3], way_correction_arguments[i][4], way_correction_arguments[i][5]) for child_seed, i in zip(child_seeds, range(len(way_correction_arguments)))
     ), total=len(way_correction_arguments)))
 
     for i in range(len(way_correction_results)):
         wid = way_correction_arguments[i][0]
         way_coordinates = way_correction_arguments[i][1]
-        adjusted_osm_points = open3d.geometry.PointCloud()
-        adjusted_osm_points.points = open3d.utility.Vector3dVector(way_coordinates)
-
         original_transformation_matrix = way_correction_results[i][0]
         original_transformation_matrix_fitness = way_correction_results[i][1]
+        way_coordinates_with_elevation = way_correction_results[i][2]
+        adjusted_osm_points = open3d.geometry.PointCloud()
+        adjusted_osm_points.points = open3d.utility.Vector3dVector(way_coordinates_with_elevation)
         adjusted_osm_points.transform(original_transformation_matrix)
 
         osm_corrected_points = np.asarray(adjusted_osm_points.points)
@@ -243,6 +260,7 @@ def correctWaysWithLidar(tdot_subset, cores=32):
 
 if __name__ == "__main__":
     tdot_subset = TDOTSubset("SubsetSelection/")
+    tdot_subset.processOSM()
     tdot_subset.osm_handler.generateImplicitWays()
 
     print("Lidar correction....")
