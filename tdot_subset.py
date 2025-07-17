@@ -102,10 +102,14 @@ class WayNodeCollector(osmium.SimpleHandler):
 
     def node(self, n):
         n_id = str(n.id)
-        coordinates = [n.location.lon, n.location.lat, 0]
+        elevation = 0.0
+        if 'ele' in n.tags:
+            elevation = float(n.tags["ele"])
+            print(elevation)
+        coordinates = [n.location.lon, n.location.lat, elevation]
         meters_coordinates = self.projectToMeters(coordinates)
         self.nodes[n_id] = {"coordinates": coordinates, "meters_coordinates": meters_coordinates, "total_ways": [], "corrected_coordinates": np.array([0, 0, 0]), "lane_widths": [], "lane_counts": [], "bridge": False}
-        
+
     def way(self, w):
         w_id = str(w.id)
         if 'highway' in w.tags:
@@ -361,6 +365,7 @@ class TDOTSubset:
         #pcd_points_points = np.asarray(pcd_points.points)
         #pcd_points_points *= feet_to_meters
         #pcd_points.points = open3d.utility.Vector3dVector(pcd_points_points)
+        #pcd_points.voxel_down_sample(voxel_size=1.0)
         pcd_points.estimate_normals(search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=10.0, max_nn=30))
         pcd_points.normalize_normals()
         pcd_points.paint_uniform_color([0.3, 0.3, 0.3])
@@ -431,10 +436,55 @@ class TDOTSubset:
         bbox_meters = self.convertToMeters(bbox)
         return self.getTilesFromBoundingBoxMeters(bbox_meters)
 
-    def MinHeightAtXYMeters(self, dem, xy_coord):
+    def minHeightAtXYMeters(self, dem, xy_coord):
         # Extract X, Y, Z
         x, y = xy_coord
         return dem.altitude((x * self.meters_to_feet),  (y * self.meters_to_feet)) * self.feet_to_meters
+
+    def lidarMedianHeightAtXYMeters(self, pcd_points, xy_coord, bbox_size=10.0):
+        delta = bbox_size / 2.0
+        bbox = open3d.geometry.AxisAlignedBoundingBox(
+            min_bound=[xy_coord[0] - delta, xy_coord[1] - delta, float('-inf')],
+            max_bound=[xy_coord[0] + delta, xy_coord[1] + delta, float('inf')]
+        )
+
+        # Crop point cloud to bounding box
+        cropped = pcd_points.crop(bbox)
+
+        # Get numpy array of cropped points
+        points = np.asarray(cropped.points)
+
+        # Get median point by Z
+        median_height = None
+        if len(points) == 0:
+            print("No points found in bounding box.")
+        else:
+            median_height = np.median(points[:, 2])
+            print("Median point:", median_height)
+        return median_height
+
+    def lidarMaxHeightAtXYMeters(self, pcd_points, xy_coord, bbox_size=1.0):
+        delta = bbox_size / 2.0
+        bbox = open3d.geometry.AxisAlignedBoundingBox(
+            min_bound=[xy_coord[0] - delta, xy_coord[1] - delta, float('-inf')],
+            max_bound=[xy_coord[0] + delta, xy_coord[1] + delta, float('inf')]
+        )
+
+        # Crop point cloud to bounding box
+        cropped = pcd_points.crop(bbox)
+
+        # Get numpy array of cropped points
+        points = np.asarray(cropped.points)
+
+        # Get highest point by Z
+        highest_point = None
+        if len(points) == 0:
+            print("No points found in bounding box.")
+        else:
+            max_idx = np.argmax(points[:, 2])  # Z-axis
+            highest_point = points[max_idx]
+            print("Highest point:", highest_point)
+        return highest_point[-1]
 
     @classmethod
     def loadJson(cls, json_path):
