@@ -8,7 +8,7 @@ import pyproj
 transformer = Transformer.from_crs("EPSG:4326", "EPSG:6576", always_xy=True)
 
 target_json = "./metadata.json"
-subset_json = "./compile_subset_medium.json"
+subset_json = "./compile_subset.json"
 
 feet_to_meters = 0.3048
 meters_to_feet = 1.0/feet_to_meters
