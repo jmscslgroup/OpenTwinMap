@@ -109,11 +109,12 @@ def schnittpunkt(x1,y1,hdg1,x2,y2,hdg2):
     return x_s,y_s,r1,r2
 
 #Cell
-def createVirtualLastPointForJunctionRoads(jx,jy,jrxs,jrys,radius = 3.0):
+def createVirtualLastPointForJunctionRoads(jx,jy,jz,jrxs,jrys,jrzs,radius = 3.0):
     lastPoints = []
     for i in range(len(jrxs)):
         x = jrxs[i]
         y = jrys[i]
+        z = jrzs[i]
         hdg1 = giveHeading(jx,jy,x,y)
         #get the 4 points to either side of the road
         hdg1_90 = hdg1-np.pi/2.0
@@ -137,12 +138,16 @@ def createVirtualLastPointForJunctionRoads(jx,jy,jrxs,jrys,radius = 3.0):
             # get the 4 intersectionPoints
             ix1,iy1,_,_ = schnittpunkt(x1t1,y1t1,hdg1,x2t1,y2t1,hdg2)
             ix1,iy1,_,_ = schnittpunkt(ix1,iy1,hdg1_90,x,y,hdg1)
+
             ix2,iy2,_,_ = schnittpunkt(x1t2,y1t2,hdg1,x2t1,y2t1,hdg2)
             ix2,iy2,_,_ = schnittpunkt(ix2,iy2,hdg1_90,x,y,hdg1)
+
             ix3,iy3,_,_ = schnittpunkt(x1t1,y1t1,hdg1,x2t2,y2t2,hdg2)
             ix3,iy3,_,_ = schnittpunkt(ix3,iy3,hdg1_90,x,y,hdg1)
+
             ix4,iy4,_,_ = schnittpunkt(x1t2,y1t2,hdg1,x2t2,y2t2,hdg2)
             ix4,iy4,_,_ = schnittpunkt(ix4,iy4,hdg1_90,x,y,hdg1)
+
             ix = [ix1,ix2,ix3,ix4]
             iy = [iy1,iy2,iy3,iy4]
             #get the radius from relevant intersections
@@ -150,7 +155,7 @@ def createVirtualLastPointForJunctionRoads(jx,jy,jrxs,jrys,radius = 3.0):
                 if min(x,jx)<ix[k]<max(x,jx) and min(y,jy)<iy[k]<max(y,jy): #point is on Line x,y to jx,jy! Relevant
                     relevantr.append(distance(ix[k],iy[k],jx,jy))
         lasty,lastx = getXYPositionFromLineLength(jx, jy, hdg1, max(relevantr))
-        lastPoints.append([lasty,lastx])
+        lastPoints.append([lasty,lastx,z])
     return lastPoints
 
 #Cell

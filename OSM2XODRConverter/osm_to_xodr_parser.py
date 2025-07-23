@@ -68,10 +68,10 @@ class OSMToXODRParser(osmium.SimpleHandler):
         node_data["x"] -= bounds[0]
         node_data["y"] -= bounds[1]
         try: 
-            self.height = float(node_data["tags"]["ele"])
+            node_data["height"] = float(node_data["tags"]["ele"])
         except: 
             print("CHUNGUS")
-            self.height = 0.0
+            node_data["height"] = None
 
         node_data["Junction"] = ""
         node_data["JunctionRoads"] = []
@@ -222,18 +222,21 @@ class OSMToXODRParser(osmium.SimpleHandler):
             node_data["Junction"] = self.giveNextElementID()
             jrxs = []
             jrys = []
-            jx,jy = [node_data["x"], node_data["y"]]
+            jzys = []
+            jx,jy,jz = [node_data["x"], node_data["y"], node_data["height"]]
             nodes = node_data["incomingrNodes"] + node_data["outgoingrNodes"]
             for node in nodes:
                 if len(node["wayList"]) > 1: #junction to junction -> do not go beyond half of the way
                     jrxs.append((node["x"]+node_data["x"])/2.0)
                     jrys.append((node["y"]+node_data["y"])/2.0)
+                    jzys.append((node["height"]+node_data["height"])/2.0)
                 else:
                     jrxs.append(node["x"])
                     jrys.append(node["y"])
+                    jzys.append(node["height"])
             maxlanes = max(node_data["incomingLanes"]+node_data["outgoingLanes"])
             radius = 4.0 * maxlanes
-            node_data["lastPoints"] = createVirtualLastPointForJunctionRoads(jx,jy,jrxs,jrys,radius = radius)
+            node_data["lastPoints"] = createVirtualLastPointForJunctionRoads(jx,jy,jz,jrxs,jrys,jzys,radius = radius)
             for way in node_data["wayList"]:
                 if node_data["id"] == way["OSMNodes"][0]:
                     way["startJunction"] = node_data["Junction"]
@@ -552,28 +555,27 @@ class OSMToXODRParser(osmium.SimpleHandler):
         return junction_data
 
     def createOSMJunctionRoadLine(self,way1,way2,junctionNode, maxerror=2.0):
-        x1,y1 = self.getRelevantLastPoint(junctionNode["id"], way1)
+        x1,y1,z1 = self.getRelevantLastPoint(junctionNode["id"], way1)
         x2 = junctionNode["x"]
         y2 = junctionNode["y"]
-        x3,y3 = self.getRelevantLastPoint(junctionNode["id"], way2)
+        z2 = junctionNode["height"]
+        x3,y3,z3 = self.getRelevantLastPoint(junctionNode["id"], way2)
         #calculate the parameter
-        xarc,yarc,xendline,yendline,curvature,length = getArcCurvatureAndLength(x1,y1,x3,y3,x2,y2, maxerror = 999999.9, minradius = 0.5, iterations = 10)
+        xarc,yarc,zarc,xendline,yendline,zendline,curvature,length = getArcCurvatureAndLength(x1,y1,z1,x3,y3,z3,x2,y2,z2, maxerror = 999999.9, minradius = 0.5, iterations = 10)
         RoadElements = [] #xstart,ystart, length, heading, curvature
         ElevationElements = []
-        z1 = self.getHeight((x1, y1))
-        z2 = self.getHeight((x2, y2))
-        z3 = self.getHeight((x3, y3))
+
         if distance(x1,y1,xarc,yarc) > 0.1:
                     RoadElements.append({"xstart":x1,"ystart":y1, "length":distance(x1,y1,xarc,yarc), "heading":giveHeading(x1,y1,x2,y2), "curvature":0.0})
                     ElevationElements.append({"xstart":x1,"ystart":y1,"zstart":z1,
-                                            "steigung":(self.getHeight((xarc, yarc))-z1)/distance(x1,y1,xarc,yarc),"length":distance(x1,y1,xarc,yarc)})
+                                            "steigung":(zarc-z1)/distance(x1,y1,xarc,yarc),"length":distance(x1,y1,xarc,yarc)})
         RoadElements.append({"xstart":xarc,"ystart":yarc, "length":length, "heading":giveHeading(x1,y1,x2,y2), "curvature":curvature})
-        ElevationElements.append({"xstart":xarc,"ystart":yarc,"zstart":self.getHeight((xarc, yarc)),
-                                        "steigung":(self.getHeight((xendline, yendline))-self.getHeight((xarc, yarc)))/length,"length":length})
+        ElevationElements.append({"xstart":xarc,"ystart":yarc,"zstart":zarc,
+                                        "steigung":(zendline-zarc)/length,"length":length})
         if distance(xendline,yendline,x3,y3) > 0.1:
                     RoadElements.append({"xstart":xendline,"ystart":yendline, "length":distance(xendline,yendline,x3,y3), "heading":giveHeading(xendline,yendline,x3,y3), "curvature":0.0})
-                    ElevationElements.append({"xstart":xendline,"ystart":yendline,"zstart":self.getHeight((xendline, yendline)),
-                                            "steigung":(z3-self.getHeight((xendline, yendline)))/distance(xendline,yendline,x3,y3),"length":distance(xendline,yendline,x3,y3)})
+                    ElevationElements.append({"xstart":xendline,"ystart":yendline,"zstart":zendline,
+                                            "steigung":(z3-zendline)/distance(xendline,yendline,x3,y3),"length":distance(xendline,yendline,x3,y3)})
         return RoadElements,ElevationElements
 
     def createOSMWayNodeList2XODRRoadLine(self, way, maxerror=2.0):
@@ -587,17 +589,17 @@ class OSMToXODRParser(osmium.SimpleHandler):
         firstNode = self.nodes[way["OSMNodes"][0]]
         if len(firstNode["wayList"]) == 1:  #firstnode ist sackgasse
             #get the full node involved
-            Points.append([firstNode["x"],firstNode["y"], self.getHeight((firstNode["x"], firstNode["y"]))])
+            Points.append([firstNode["x"],firstNode["y"], firstNode["height"]])
         else: #firstnode is junction
             #get the relevant lastPoint as NodePoint
-            x,y = self.getRelevantLastPoint(firstNode["id"], way)
-            Points.append([x,y,self.getHeight((x, y))])
+            x,y,z = self.getRelevantLastPoint(firstNode["id"], way)
+            Points.append([x,y,z])
 
         #middle element:
         for nodeId in way["OSMNodes"][1:-1]:
             node = self.nodes[nodeId]
             hdgs.append(giveHeading(Points[-1][0],Points[-1][1],node["x"],node["y"]))
-            Points.append([node["x"],node["y"], self.getHeight((node["x"], node["y"]))])
+            Points.append([node["x"],node["y"], node["height"]])
 
 
         #last element:
@@ -605,12 +607,12 @@ class OSMToXODRParser(osmium.SimpleHandler):
         if len(lastNode["wayList"]) == 1:  #firstnode ist sackgasse
             #get the full node involved
             hdgs.append(giveHeading(Points[-1][0],Points[-1][1],lastNode["x"],lastNode["y"]))
-            Points.append([lastNode["x"],lastNode["y"], self.getHeight((lastNode["x"], lastNode["y"]))])
+            Points.append([lastNode["x"],lastNode["y"], lastNode["height"]])
 
         else: #lastnode is junction
             #get the relevant lastPoint as NodePoint
-            x,y = self.getRelevantLastPoint(lastNode["id"], way)
-            Points.append([x,y,self.getHeight((x,y))])
+            x,y,z = self.getRelevantLastPoint(lastNode["id"], way)
+            Points.append([x,y,z])
             hdgs.append(giveHeading(x,y,lastNode["x"],lastNode["y"]))
 
         if len(Points) == 2:
@@ -631,27 +633,27 @@ class OSMToXODRParser(osmium.SimpleHandler):
                 else:
                     x1 = (x1+x2)/2.0
                     y1 = (y1+y2)/2.0
-                    z1 = self.getHeight((x1, y1))
+                    z1 = (z1+z2)/2.0
                 if i == len(Points)-3:
                     pass
                 else:
                     x3 = (x3+x2)/2.0
                     y3 = (y3+y2)/2.0
-                    z3 = self.getHeight((x3, y3))
+                    z3 = (z3+z2)/2.0
                 #calculate the parameter
-                xarc,yarc,xendline,yendline,curvature,length = getArcCurvatureAndLength(x1,y1,x3,y3,x2,y2, maxerror = maxerror, minradius = 0.5, iterations = 10)
-
+                xarc,yarc,zarc,xendline,yendline,zendline,curvature,length = getArcCurvatureAndLength(x1,y1,z1,x3,y3,z3,x2,y2,z2, maxerror = maxerror, minradius = 0.5, iterations = 10)
+                distance_arc, distance_endline = distance(x1,y1,xarc,yarc), distance(xendline,yendline,x3,y3)
                 if distance(x1,y1,xarc,yarc) > 0.1:
-                    RoadElements.append({"xstart":x1,"ystart":y1, "length":distance(x1,y1,xarc,yarc), "heading":hdgs[i], "curvature":0.0})
+                    RoadElements.append({"xstart":x1,"ystart":y1, "length":distance_arc, "heading":hdgs[i], "curvature":0.0})
                     ElevationElements.append({"xstart":x1,"ystart":y1,"zstart":z1,
-                                            "steigung":(self.getHeight((xarc, yarc))-z1)/distance(x1,y1,xarc,yarc),"length":distance(x1,y1,xarc,yarc)})
+                                            "steigung":(zarc-z1)/distance_arc,"length":distance_arc})
                 RoadElements.append({"xstart":xarc,"ystart":yarc, "length":length, "heading":hdgs[i], "curvature":curvature})
-                ElevationElements.append({"xstart":xarc,"ystart":yarc,"zstart":self.getHeight((xarc, yarc)),
-                                        "steigung":(self.getHeight((xendline, yendline))-self.getHeight((xarc, yarc)))/length,"length":length})
+                ElevationElements.append({"xstart":xarc,"ystart":yarc,"zstart":zarc,
+                                        "steigung":(zendline-zarc)/length,"length":length})
                 if distance(xendline,yendline,x3,y3) > 0.1:
-                    RoadElements.append({"xstart":xendline,"ystart":yendline, "length":distance(xendline,yendline,x3,y3), "heading":giveHeading(xendline,yendline,x3,y3), "curvature":0.0})
-                    ElevationElements.append({"xstart":xendline,"ystart":yendline,"zstart":self.getHeight((xendline, yendline)),
-                                            "steigung":(z3-self.getHeight((xendline, yendline)))/distance(xendline,yendline,x3,y3),"length":distance(xendline,yendline,x3,y3)})
+                    RoadElements.append({"xstart":xendline,"ystart":yendline, "length":distance_endline, "heading":giveHeading(xendline,yendline,x3,y3), "curvature":0.0})
+                    ElevationElements.append({"xstart":xendline,"ystart":yendline,"zstart":zendline,
+                                            "steigung":(z3-zendline)/distance_endline,"length":distance_endline})
 
         return RoadElements,ElevationElements
 

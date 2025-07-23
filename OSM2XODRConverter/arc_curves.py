@@ -32,7 +32,7 @@ def getArcEndposition(curvature,length,xstart,ystart,hdg_start):
     return x_end, y_end, getPositiveHeading(hdg_end)
 
 #Cell
-def getArcCurvatureAndLength(xstart,ystart,x_end,y_end, x_curveMid, y_curveMid, maxerror = 0.8, minradius = 0.5, iterations = 10):
+def getArcCurvatureAndLength(xstart,ystart,zstart,x_end,y_end,z_end, x_curveMid, y_curveMid, z_curveMid, maxerror = 0.8, minradius = 0.5, iterations = 10):
     #print("Calculating Curve from {0},{1}  over {2},{3} to {4},{5}".format(xstart,ystart,x_curveMid, y_curveMid,x_end,y_end))
     hdg_start = giveHeading(xstart,ystart,x_curveMid, y_curveMid)
     hdg_mid2end = giveHeading(x_curveMid, y_curveMid, x_end,y_end)
@@ -43,28 +43,19 @@ def getArcCurvatureAndLength(xstart,ystart,x_end,y_end, x_curveMid, y_curveMid, 
     maxDist = distance(x_curveMid,y_curveMid,xstart,ystart) if distance(x_curveMid,y_curveMid,xstart,ystart) <= \
                 distance(x_curveMid,y_curveMid,x_end,y_end) else distance(x_curveMid,y_curveMid,x_end,y_end)
     if abs(deltaHdg) < 0.0001:
-        return xstart,ystart,x_end,y_end,0.0,distance(xstart,ystart,x_end,y_end)
+        return xstart,ystart,zstart,x_end,y_end,z_end,0.0,distance(xstart,ystart,x_end,y_end)
     hdg_90_a = hdg_start-np.pi/2.0
     hdg_90_b = hdg_mid2end - np.pi/2.0
 
-    #dist = < maxDist
-
-    #x1 = x_curveMid + dist*np.cos(hdg_start-np.pi)
-    #y1 = y_curveMid + dist*np.sin(hdg_start-np.pi)
-    #x2 = x_curveMid + dist*np.cos(hdg_mid2end)
-    #y2 = y_curveMid + dist*np.sin(hdg_mid2end)
-    #r1 = (-y2 + y1)/((np.sin(hdg_90_a)  + np.sin(hdg_90_b) * (x1 + np.cos(hdg_90_a))/(x2 + np.cos(hdg_90_b)) ))
-    #x_m = x1 + np.cos(hdg_90_a) * r1
-    #y_m = y1 - np.sin(hdg_90_a) * r1
-    #error = ((x_m-x_curveMid)**2 + (y_m-y_curveMid)**2)**0.5  - r1
-    # get dist from error...
 
     dist = maxDist
     bestDist = dist
     x1 = x_curveMid + dist*np.cos(hdg_start-np.pi)
     y1 = y_curveMid + dist*np.sin(hdg_start-np.pi)
+    z1 = zstart
     x2 = x_curveMid + dist*np.cos(hdg_mid2end)
     y2 = y_curveMid + dist*np.sin(hdg_mid2end)
+    z2 = z_end
     x_m,y_m,r1,r2 = schnittpunkt(x1,y1,hdg_90_a,x2,y2,hdg_90_b)
     error = distance(x_m,y_m,x_curveMid,y_curveMid) - abs(r1)
     if error < maxerror:
@@ -93,7 +84,7 @@ def getArcCurvatureAndLength(xstart,ystart,x_end,y_end, x_curveMid, y_curveMid, 
     x_s,y_s,r1,r2 = schnittpunkt(x1,y1,hdg_90_a,x2,y2,hdg_90_b)
     length = abs(r1)*abs(deltaHdg)  #2pi r für vollen kreisbogen
     curvature = -deltaHdg / length
-    return x1,y1,x2,y2,curvature,length
+    return x1,y1,z1,x2,y2,z2,curvature,length
 
 #Cell
 def getArcCurvatureAndLength2Point(xstart,ystart,x_end,y_end, hdg_start, hdg_end):
