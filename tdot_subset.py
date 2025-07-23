@@ -462,7 +462,8 @@ class TDOTSubset:
     def minHeightAtXYMeters(self, dem, xy_coord):
         # Extract X, Y, Z
         x, y = xy_coord
-        return dem.altitude((x * self.meters_to_feet),  (y * self.meters_to_feet)) * self.feet_to_meters
+        result = dem.altitude((x * self.meters_to_feet),  (y * self.meters_to_feet)) * self.feet_to_meters
+        return result
 
     def lidarMedianHeightAtXYMeters(self, pcd_points, xy_coord, bbox_size=10.0):
         delta = bbox_size / 2.0
