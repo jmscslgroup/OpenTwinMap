@@ -14,6 +14,7 @@ import osmium
 import math
 import networkx as nx
 import hashlib
+import time
 from DEM_python import DEM
 import xml.etree.ElementTree as ET
 
@@ -82,6 +83,7 @@ def downloadOSM(osm_folder, metadata, tile):
     print("Invoking ", "https://api.openstreetmap.org/api/0.6/map?bbox=")
     api_path = "https://api.openstreetmap.org/api/0.6/map?bbox={},{},{},{}".format(bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3])
     subprocess.run(["wget", "-O", osm_path, api_path], shell=False)
+    time.sleep(5.0)
 
 class WayNodeCollector(osmium.SimpleHandler):
     feet_to_meters = 0.3048
@@ -346,11 +348,32 @@ class TDOTSubset:
     def getOSMPath(self):
         return os.path.join(self.root_folder, self.osm_path)
 
+    def getCorrectedOSMPath(self):
+        return os.path.join(self.root_folder, "osm_subset_corrected.osm")
+
     def getDEMPath(self, tile):
         return os.path.join(self.root_folder, self.metadata_json["tiles"][tile]["DEM"]["path"])
 
     def getLAZPath(self, tile):
         return os.path.join(self.root_folder, self.metadata_json["tiles"][tile]["LAZ"]["path"])
+    
+    def getXODRPath(self):
+        return os.path.join(self.root_folder, "map.xodr")
+
+    def getBoundsInCoords(self):
+        all_tiles = self.getAllTiles()
+        southwest_coordinates = [self.metadata_json["tiles"][tile]["GEOJSON"]["bounds"]["min"] for tile in all_tiles]
+        southwest_bound = getSouthWestCoordinate(southwest_coordinates)
+        northeast_coordinates = [self.metadata_json["tiles"][tile]["GEOJSON"]["bounds"]["max"] for tile in all_tiles]
+        northeast_bound = getNorthEastCoordinate(northeast_coordinates)
+        return np.array([southwest_bound[0], southwest_bound[1], northeast_bound[0], northeast_bound[1]])
+
+    def getBoundsInMeters(self):
+        bounds_coords = self.getBoundsInCoords()
+        result = [0, 0, 0, 0]
+        result[:2] = self.convertToMeters(bounds_coords[:2])
+        result[2:] = self.convertToMeters(bounds_coords[2:])
+        return np.array(result)
 
     def getAllTiles(self):
         return [k for k in self.metadata_json["tiles"]]
