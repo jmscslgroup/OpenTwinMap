@@ -299,7 +299,8 @@ class TDOTSubset:
         del state['proj']
         del state['meters_index']
         del state['coords_index']
-        del state['osm_handler']
+        if 'osm_handler' in state:
+            del state['osm_handler']
         return state
 
     def __setstate__(self, state):
