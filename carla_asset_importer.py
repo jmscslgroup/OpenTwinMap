@@ -34,13 +34,16 @@ class CarlaAssetImporter:
         return os.path.join(self.terrain_path, "meshes/", f"{int(x*1000)}_{int(y*1000)}.obj")
 
     @staticmethod
-    def _generateTerrainTileMethod(mesh_path, map_data, dem_data, bounding_box):
+    def _generateTerrainTileMethod(mesh_path, map_data, dem_data, bounding_box, tile_point_interval):
         min_x, min_y, max_x, max_y = bounding_box
-        tile_size = max_x - min_x
-        number_of_points_on_side = int(tile_size / self.tile_point_interval)
+        tile_size_x = max_x - min_x
+        tile_size_y = max_y - min_y
 
-        xs = np.linspace(min_x, max_x, number_of_points_on_side)
-        ys = np.linspace(min_y, max_y, number_of_points_on_side)
+        number_of_points_on_side_x = int(tile_size_x / tile_point_interval)
+        number_of_points_on_side_y = int(tile_size_y / tile_point_interval)
+
+        xs = np.linspace(min_x, max_x, number_of_points_on_side_x)
+        ys = np.linspace(min_y, max_y, number_of_points_on_side_y)
         xv, yv = np.meshgrid(xs, ys)
         zv = np.zeros_like(xv)
         for i in range(yv.shape[0]):
@@ -52,19 +55,19 @@ class CarlaAssetImporter:
         vertices = np.stack([xv, yv, zv], axis=1)
 
         faces = []
-        for i in range(number_of_points_on_side - 1):
-            for j in range(number_of_points_on_side - 1):
-                i0 = i * number_of_points_on_side + j
+        for i in range(number_of_points_on_side_y - 1):
+            for j in range(number_of_points_on_side_x - 1):
+                i0 = i * number_of_points_on_side_x + j
                 i1 = i0 + 1
-                i2 = i0 + number_of_points_on_side
+                i2 = i0 + number_of_points_on_side_x
                 i3 = i2 + 1
                 # Two triangles per grid square
                 faces.append([i0, i2, i1])
                 faces.append([i1, i2, i3])
         faces = np.array(faces)
 
-        uv_x = xv / tile_size
-        uv_y = yv / tile_size
+        uv_x = xv / tile_size_x
+        uv_y = yv / tile_size_y
         uvs = np.stack([uv_x, uv_y], axis=1)
 
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
@@ -87,7 +90,9 @@ class CarlaAssetImporter:
         return mesh_metadata
 
     def getTerrainTileBoundingBox(self, x, y):
-        return np.array([x, y, x + self.tile_size, y + self.tile_size])
+        min_x, min_y = x, y
+        max_x, max_y = min(x + self.tile_size, self.metadata["bounds"][2]), min(y + self.tile_size, self.metadata["bounds"][3])
+        return np.array([min_x, min_y, max_x, max_y])
 
     def generateTerrainTile(self, x, y):
         mesh_folder = os.path.join(self.terrain_path, "meshes/")
@@ -95,13 +100,14 @@ class CarlaAssetImporter:
         tile_bounding_box = self.getTerrainTileBoundingBox(x, y)
         dem_data = self.map_data.loadDEMsFromBoundingBoxMeters(tile_bounding_box)
         mesh_path = self.generateTerrainPath(x,y)
-        mesh_metadata = self._generateTerrainTileMethod(mesh_path, self.map_data, dem_data, x, y)
+        mesh_metadata = self._generateTerrainTileMethod(mesh_path, self.map_data, dem_data, tile_bounding_box, self.tile_point_interval)
         self.metadata["terrain"][mesh_path] = mesh_metadata
 
     def generateTerrain(self):
         for y in np.arange(self.metadata["bounds"][1], self.metadata["bounds"][3], self.tile_size):
             for x in np.arange(self.metadata["bounds"][0], self.metadata["bounds"][2], self.tile_size):
                 self.generateTerrainTile(x,y)
+                print(y,x)
 
     def saveMetadata(self):
         with open(self.metadata_path, "w") as f:
