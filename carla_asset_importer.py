@@ -23,16 +23,22 @@ def _generateTerrainTileMethod(mesh_path, map_data, bounding_box, tile_point_int
     number_of_points_on_side_x = int(tile_size_x / tile_point_interval)
     number_of_points_on_side_y = int(tile_size_y / tile_point_interval)
 
-    xs = np.linspace(min_x, max_x, number_of_points_on_side_x)
-    ys = np.linspace(min_y, max_y, number_of_points_on_side_y)
+    #xs = np.linspace(min_x, max_x, number_of_points_on_side_x)
+    #ys = np.linspace(min_y, max_y, number_of_points_on_side_y)
+    xs = np.linspace(0, max_x - min_x, number_of_points_on_side_x)
+    ys = np.linspace(0, max_y - min_y, number_of_points_on_side_y)
     xv, yv = np.meshgrid(xs, ys)
     zv = np.zeros_like(xv)
+    bottom_left_corner_height = map_data.minHeightAtXYMeters(dem_data, (min_x, min_y))
     for i in range(yv.shape[0]):
         for j in range(xv.shape[1]):
-            zv[i][j] = map_data.minHeightAtXYMeters(dem_data, (xv[i][j], yv[i][j]))
+            zv[i][j] = map_data.minHeightAtXYMeters(dem_data, (xv[i][j] + min_x, yv[i][j] + min_y))
+    
     xv = xv.flatten()
     yv = yv.flatten()
     zv = zv.flatten()
+    min_z, max_z = zv.min(), zv.max()
+    zv -= min_z
     vertices = np.stack([xv, yv, zv], axis=1)
 
     faces = []
@@ -43,8 +49,8 @@ def _generateTerrainTileMethod(mesh_path, map_data, bounding_box, tile_point_int
             i2 = i0 + number_of_points_on_side_x
             i3 = i2 + 1
             # Two triangles per grid square
-            faces.append([i0, i2, i1])
-            faces.append([i1, i2, i3])
+            faces.append([i0, i1, i2])
+            faces.append([i1, i3, i2])
     faces = np.array(faces)
 
     uv_x = xv / tile_size_x
@@ -54,6 +60,7 @@ def _generateTerrainTileMethod(mesh_path, map_data, bounding_box, tile_point_int
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
     mesh.visual.uv = uvs
     # Remember, in Unreal, x becomes y, and y becomes x.
+    
     R = trimesh.transformations.rotation_matrix(
         angle=np.radians(-90),
         direction=[0, 0, 1],
@@ -62,14 +69,17 @@ def _generateTerrainTileMethod(mesh_path, map_data, bounding_box, tile_point_int
     if not np.all(np.isfinite(mesh.vertices)):
         raise ValueError("Vertices contain NaNs or Infs")
     mesh.apply_transform(R)
+    
     #mesh.compute_vertex_normals()
     mesh.export(mesh_path)
 
     mesh_metadata = {}
-    mesh_metadata["min_x"] = min_x
-    mesh_metadata["min_y"] = min_y
-    mesh_metadata["max_x"] = max_x
-    mesh_metadata["max_y"] = max_y
+    mesh_metadata["min_y"] = min_x
+    mesh_metadata["min_x"] = min_y
+    mesh_metadata["max_y"] = max_x
+    mesh_metadata["max_x"] = max_y
+    mesh_metadata["min_z"] = min_z
+    mesh_metadata["max_z"] = max_z
     mesh_metadata["tile_point_interval"] = tile_point_interval
     mesh_metadata["path"] = mesh_path
     return mesh_metadata
@@ -80,7 +90,8 @@ class CarlaAssetImporter:
     metadata = {}
     dem_data = None
     tile_size = 100.0
-    tile_point_interval = 0.3048 # 1 ft resolution
+    tile_point_interval = 0.3048*2 # 2 ft resolution
+    feet_to_meters = 0.3048
 
     def __init__(self, map_data, cooked_path):
         self.map_data = map_data
@@ -88,6 +99,10 @@ class CarlaAssetImporter:
         self.cooked_dataset = CarlaAssetDataset(self.cooked_path, initialized=False)
         os.makedirs(self.cooked_path, exist_ok=True)
         self.metadata["bounds"] = self.map_data.getBoundsInMeters().tolist()
+        dem_data_tmp = self.map_data.loadDEMs(self.map_data.getAllTiles())
+        self.metadata["bounds"].insert(2, dem_data_tmp.get_min() * self.feet_to_meters)
+        self.metadata["bounds"].insert(5, dem_data_tmp.get_max() * self.feet_to_meters)
+        del dem_data_tmp
         self.metadata["terrain"] = {}
 
     def copyXODR(self):
@@ -99,7 +114,7 @@ class CarlaAssetImporter:
 
     def getTerrainTileBoundingBox(self, x, y):
         min_x, min_y = x, y
-        max_x, max_y = min(x + self.tile_size, self.metadata["bounds"][2]), min(y + self.tile_size, self.metadata["bounds"][3])
+        max_x, max_y = min(x + self.tile_size, self.metadata["bounds"][3]), min(y + self.tile_size, self.metadata["bounds"][4])
         return np.array([min_x, min_y, max_x, max_y])
 
     def generateTerrainTile(self, x, y):
@@ -115,8 +130,8 @@ class CarlaAssetImporter:
         os.makedirs(mesh_folder, exist_ok=True)
 
         jobs = []
-        for y in np.arange(self.metadata["bounds"][1], self.metadata["bounds"][3], self.tile_size):
-            for x in np.arange(self.metadata["bounds"][0], self.metadata["bounds"][2], self.tile_size):
+        for y in np.arange(self.metadata["bounds"][1], self.metadata["bounds"][4], self.tile_size):
+            for x in np.arange(self.metadata["bounds"][0], self.metadata["bounds"][3], self.tile_size):
                 tile_bounding_box = self.getTerrainTileBoundingBox(x, y)
                 mesh_path = self.generateTerrainPath(x,y)
                 jobs.append([mesh_path, self.map_data, tile_bounding_box, self.tile_point_interval])
@@ -133,7 +148,7 @@ class CarlaAssetImporter:
                 for future in concurrent.futures.as_completed(futures):
                     mesh_metadata = future.result()
                     self.metadata["terrain"][mesh_metadata["path"]] = mesh_metadata
-                    print(mesh_path)
+                    print(mesh_metadata["path"])
 
     def saveMetadata(self):
         with open(self.cooked_dataset.metadata_path, "w") as f:

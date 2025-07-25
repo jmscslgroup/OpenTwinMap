@@ -25,14 +25,21 @@ class CarlaAssetDataset:
         with open(self.metadata_path, "r") as f:
             self.metadata = json.load(f)
 
+    def getBounds(self):
+        return self.metadata["bounds"]
+
     def getTerrainMeshesMetadata(self):
         return self.metadata["terrain"]
 
     @staticmethod
-    def loadTerrainMesh(mesh_metadata):
+    def loadTerrainMesh(mesh_metadata, move_to_position=True):
         import open3d
         import numpy as np
         mesh = open3d.io.read_triangle_mesh(mesh_metadata["path"])
+        R_back = mesh.get_rotation_matrix_from_axis_angle([0, 0, np.radians(90)])
+        mesh.rotate(R_back, center=(0, 0, 0))
+        if move_to_position:
+            mesh.translate(np.array([mesh_metadata["min_y"], mesh_metadata["min_x"], mesh_metadata["min_z"]]))
         mesh.compute_vertex_normals()
         #camera_location = np.array([(mesh_metadata["min_x"] + mesh_metadata["max_x"]) / 2.0, (mesh_metadata["min_y"] + mesh_metadata["max_y"]) / 2.0, 100000])
         #cpu_mesh = mesh.to_legacy()

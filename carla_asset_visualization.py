@@ -13,4 +13,6 @@ class CarlaAssetVisualization:
 
     def visualizeTerrainMeshes(self):
         terrain_meshes = self.dataset.loadTerrainMeshList(self.dataset.getTerrainMeshesMetadata().values())
-        open3d.visualization.draw_geometries(terrain_meshes, mesh_show_back_face=True)
+        print([self.dataset.getBounds()[0], self.dataset.getBounds()[1], self.dataset.getBounds()[2]])
+        terrain_meshes.append(open3d.geometry.TriangleMesh.create_coordinate_frame(size=100.0, origin=[self.dataset.getBounds()[0], self.dataset.getBounds()[1], self.dataset.getBounds()[2]]))
+        open3d.visualization.draw_geometries(terrain_meshes)#, mesh_show_back_face=True)

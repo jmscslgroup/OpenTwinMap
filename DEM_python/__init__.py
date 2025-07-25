@@ -90,3 +90,9 @@ class DEM:
         top_right_value = del_x * del_y * self.csv_data.iloc[top_right_index].z
 
         return bottom_left_value + top_left_value + bottom_right_value + top_right_value
+
+    def get_min(self):
+        return self.csv_data.z.min()
+
+    def get_max(self):
+        return self.csv_data.z.max()
