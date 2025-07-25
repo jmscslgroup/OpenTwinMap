@@ -98,10 +98,13 @@ class CarlaAssetImporter:
         self.cooked_path = cooked_path
         self.cooked_dataset = CarlaAssetDataset(self.cooked_path, initialized=False)
         os.makedirs(self.cooked_path, exist_ok=True)
-        self.metadata["bounds"] = self.map_data.getBoundsInMeters().tolist()
+        map_data_bounds = self.map_data.getBoundsInMeters().tolist()
+        self.metadata["original_bounds"] = self.map_data.getBoundsInMeters().tolist()
         dem_data_tmp = self.map_data.loadDEMs(self.map_data.getAllTiles())
-        self.metadata["bounds"].insert(2, dem_data_tmp.get_min() * self.feet_to_meters)
-        self.metadata["bounds"].insert(5, dem_data_tmp.get_max() * self.feet_to_meters)
+        min_z =  dem_data_tmp.get_min() * self.feet_to_meters
+        max_z = dem_data_tmp.get_max() * self.feet_to_meters
+        self.metadata["original_bounds"] = [map_data_bounds[0], map_data_bounds[1], min_z, map_data_bounds[2], map_data_bounds[3]]
+        self.metadata["carla_bounds"] = [map_data_bounds[1], map_data_bounds[0], min_z, map_data_bounds[3], map_data_bounds[2]]
         del dem_data_tmp
         self.metadata["terrain"] = {}
 
@@ -114,7 +117,7 @@ class CarlaAssetImporter:
 
     def getTerrainTileBoundingBox(self, x, y):
         min_x, min_y = x, y
-        max_x, max_y = min(x + self.tile_size, self.metadata["bounds"][3]), min(y + self.tile_size, self.metadata["bounds"][4])
+        max_x, max_y = min(x + self.tile_size, self.metadata["original_bounds"][3]), min(y + self.tile_size, self.metadata["original_bounds"][4])
         return np.array([min_x, min_y, max_x, max_y])
 
     def generateTerrainTile(self, x, y):
@@ -130,8 +133,8 @@ class CarlaAssetImporter:
         os.makedirs(mesh_folder, exist_ok=True)
 
         jobs = []
-        for y in np.arange(self.metadata["bounds"][1], self.metadata["bounds"][4], self.tile_size):
-            for x in np.arange(self.metadata["bounds"][0], self.metadata["bounds"][3], self.tile_size):
+        for y in np.arange(self.metadata["original_bounds"][1], self.metadata["original_bounds"][4], self.tile_size):
+            for x in np.arange(self.metadata["original_bounds"][0], self.metadata["original_bounds"][3], self.tile_size):
                 tile_bounding_box = self.getTerrainTileBoundingBox(x, y)
                 mesh_path = self.generateTerrainPath(x,y)
                 jobs.append([mesh_path, self.map_data, tile_bounding_box, self.tile_point_interval])

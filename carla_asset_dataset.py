@@ -25,8 +25,11 @@ class CarlaAssetDataset:
         with open(self.metadata_path, "r") as f:
             self.metadata = json.load(f)
 
-    def getBounds(self):
-        return self.metadata["bounds"]
+    def getOriginalBounds(self):
+        return self.metadata["original_bounds"]
+
+    def getCarlaBounds(self):
+        return self.metadata["carla_bounds"]
 
     def getTerrainMeshesMetadata(self):
         return self.metadata["terrain"]
