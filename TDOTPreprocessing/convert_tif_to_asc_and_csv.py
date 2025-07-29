@@ -1,17 +1,15 @@
-import json
+import os
 import subprocess
 import joblib
 from tqdm import tqdm
 from pathlib import Path
 
-target_json = "./metadata.json"
+DEM_path = "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/DEM/Davidson_County_2022_QL1_DEM/Davidson_County_2022_QL1_DEM_tiles"
 
-def get_metadata():
-	with open(target_json, "r") as f:
-		data = json.load(f)
-	return data
+def get_all_tiles():
+	return [os.path.splitext(entry)[0] for entry in os.listdir(DEM_path) if (".tif" == os.path.splitext(entry)[1]) and ("." not in os.path.splitext(entry)[0])]
 
-metadata = get_metadata()
+tile_list = get_all_tiles()
 
 def convert_tif_to_asc_and_csv(tif_file):
     if not Path(tif_file).exists():
@@ -26,7 +24,7 @@ def convert_tif_to_asc_and_csv(tif_file):
     #print("Invoking command ", commands)
     subprocess.run(commands, shell=False)
 
-tif_files = [metadata[entry]["DEM"]["tif_path"] for entry in metadata if entry != "selected_origin"]
+tif_files = [os.path.join(DEM_path, entry+".tif") for entry in tile_list]
 
 
 result = list(tqdm(

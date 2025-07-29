@@ -19,7 +19,7 @@ def get_geojson_data():
 	return result
 
 def get_all_tiles():
-	return [os.path.splitext(entry)[0] for entry in os.listdir(DEM_path)]
+	return [os.path.splitext(entry)[0] for entry in os.listdir(DEM_path) if (".tif" == os.path.splitext(entry)[1]) and ("." not in os.path.splitext(entry)[0])]
 
 #tile_list = ["148110"]
 GEOJSON_data = get_geojson_data()
@@ -30,7 +30,8 @@ def fetchDEMData(tile):
 	asc_path = os.path.join(DEM_path, tile + ".asc")
 	bin_path = os.path.join(DEM_path, tile + ".bin")
 	csv_path = os.path.join(DEM_path, tile + ".csv")
-	asc_data_loaded = pandas.read_csv(asc_path, names=["x", "y", "z"], sep=" ")
+	print(asc_path)
+	asc_data_loaded = pandas.read_csv(asc_path, names=["x", "y", "z"], sep=" ", skiprows=6)
 	dem_metadata = {}
 	dem_metadata["path"] = tif_path
 	dem_metadata["tif_path"] = tif_path
