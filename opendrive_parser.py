@@ -147,12 +147,16 @@ class Road:
     road_length = None
     geometries = None
     lane_sections = None
+    elevation_segments = None
+    superelevation_segments = None
 
-    def __init__(self, road_id, road_length, geometries, lane_sections):
+    def __init__(self, road_id, road_length, geometries, lane_sections, elevation_segments = None, superelevation_segments = None):
         self.id = road_id
         self.road_length = road_length
         self.geometries = geometries
         self.lane_sections = sorted(lane_sections, key=lambda ls: ls.s_start)
+        self.elevation_segments = sorted(elevation_segments or [], key=lambda seg: seg[0])
+        self.superelevation_segments = sorted(superelevation_segments or [], key=lambda seg: seg[0])
 
     def toDict(self):
         result = vars(self)
@@ -178,6 +182,44 @@ class Road:
             else:
                 break
         return current
+
+    def elevationAt(self, s):
+        """Compute elevation z at global s using the elevation profile.
+
+        If no elevation segments are defined the result is 0.0.  The height is
+        computed using a cubic polynomial z(ds) = a + b*ds + c*ds**2 + d*ds**3
+        where ds is measured from the segment's start offset.
+        """
+        if not self.elevation_segments:
+            return 0.0
+        current_seg = self.elevation_segments[0]
+        for seg in self.elevation_segments:
+            if s >= seg[0]:
+                current_seg = seg
+            else:
+                break
+        s_offset, a, b, c, d = current_seg
+        ds = max(s - s_offset, 0.0)
+        return a + b * ds + c * ds ** 2 + d * ds ** 3
+
+    def superElevationAt(self, s):
+        """Compute superelevation angle at global s.
+
+        The superelevation profile is defined by polynomial segments similar to
+        elevation.  Positive values denote a road falling to the right side【701275300476046†L262-L281】.
+        Returns 0.0 if no superelevation is defined.
+        """
+        if not self.superelevation_segments:
+            return 0.0
+        current_seg = self.superelevation_segments[0]
+        for seg in self.superelevation_segments:
+            if s >= seg[0]:
+                current_seg = seg
+            else:
+                break
+        s_offset, a, b, c, d = current_seg
+        ds = max(s - s_offset, 0.0)
+        return a + b * ds + c * ds ** 2 + d * ds ** 3
 
     def sampleReferenceLine(self, max_step = 5.0):
         """Sample the road's reference line along all geometries.
@@ -266,7 +308,27 @@ class OpenDriveParser:
                         width_segments = self.parseWidthSegments(lane_elem)
                         lanes_dict[lane_id] = Lane(lane_id, width_segments)
                 lane_sections.append(LaneSection(s_start, lanes_dict))
-        return Road(road_id, length, geometries, lane_sections)
+        # Parse elevation profile
+        elevation_segments = []
+        elev_profile = road_tag.find('elevationProfile')
+        if elev_profile is not None:
+            for elev in elev_profile.findall('elevation'):
+                try:
+                    s_offset = float(elev.get('s', elev.get('sOffset', '0')))
+                    a = float(elev.get('a', '0'))
+                    b = float(elev.get('b', '0'))
+                    c = float(elev.get('c', '0'))
+                    d = float(elev.get('d', '0'))
+                except (TypeError, ValueError):
+                    continue
+                elevation_segments.append((s_offset, a, b, c, d))
+        return Road(
+            road_id,
+            length,
+            geometries,
+            lane_sections,
+            elevation_segments=elevation_segments
+        )
 
     def parseJunction(self, junction_tag):
         connections = []

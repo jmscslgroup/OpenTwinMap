@@ -140,15 +140,17 @@ def _generateRoadMeshMethod(full_mesh_path, mesh_path, road, max_step=0.2, thick
 
     # Precompute left/right widths for each sample
     widths_lr = []
+    elevations = []
     for s, x, y, phi in ref_samples:
         ls = road.laneSectionAt(s)
         lw, rw = ls.widthAt(s)
         widths_lr.append((lw, rw))
+        elevations.append(road.elevationAt(s))
 
     # Build vertices and UVs: for each sample create four vertices (top left,
     # top right, bottom left, bottom right).  We'll normalise u by road
     # length and v by width or depth accordingly.
-    for idx, ((s, x, y, phi), (lw, rw)) in enumerate(zip(ref_samples, widths_lr)):
+    for idx, ((s, x, y, phi), (lw, rw), z_elev) in enumerate(zip(ref_samples, widths_lr, elevations)):
         # unit normal (perpendicular to heading)
         n_x = -math.sin(phi)
         n_y = math.cos(phi)
@@ -157,15 +159,42 @@ def _generateRoadMeshMethod(full_mesh_path, mesh_path, road, max_step=0.2, thick
         left_y = y + n_y * lw
         right_x = x - n_x * rw
         right_y = y - n_y * rw
-        top_z = 0.0
-        bottom_z = -thickness
+        # Superelevation angle
+        sup = road.superElevationAt(s)
+        # Height offsets due to sup: z_offset = tan(sup) * t (t is positive to left, negative to right)
+        z_offset_left = math.tan(sup) * (lw)
+        z_offset_right = math.tan(sup) * (-rw)
+        # Base top z-values
+        top_z_left = z_elev + z_offset_left
+        top_z_right = z_elev + z_offset_right
+        # Compute a local normal (plane normal) rotated by sup around road direction
+        dx = math.cos(phi)
+        dy = math.sin(phi)
+        # Rotated normal (not normalised). See Rodrigues' rotation formula in analysis.
+        # vertical vector = (0,0,1). cross(dir, vertical) = (dy, -dx, 0)
+        rn_x = dy * math.sin(sup)
+        rn_y = -dx * math.sin(sup)
+        rn_z = math.cos(sup)
+        # Normalize the rotated normal
+        norm = math.sqrt(rn_x * rn_x + rn_y * rn_y + rn_z * rn_z)
+        if norm > 0:
+            rn_x /= norm
+            rn_y /= norm
+            rn_z /= norm
+        # Bottom vertices: extrude along negative normal
+        bottom_z_left = top_z_left - thickness * rn_z
+        bottom_z_right = top_z_right - thickness * rn_z
+        bottom_x_left = left_x - thickness * rn_x
+        bottom_y_left = left_y - thickness * rn_y
+        bottom_x_right = right_x - thickness * rn_x
+        bottom_y_right = right_y - thickness * rn_y
         # Normalised coordinate along length
         u_coord = s / road.road_length if road.road_length > 0 else 0.0
         # Add vertices: order matters for indexing later
-        v_left_top = [left_x, left_y, top_z]
-        v_right_top = [right_x, right_y, top_z]
-        v_left_bottom = [left_x, left_y, bottom_z]
-        v_right_bottom = [right_x, right_y, bottom_z]
+        v_left_top = [left_x, left_y, top_z_left]
+        v_right_top = [right_x, right_y, top_z_right]
+        v_left_bottom = [left_x, left_y, bottom_z_left]
+        v_right_bottom = [right_x, right_y, bottom_z_right]
         vertices.extend([v_left_top, v_right_top, v_left_bottom, v_right_bottom])
         # UVs for these four vertices
         # Top surface: v=0 at left, v=1 at right
