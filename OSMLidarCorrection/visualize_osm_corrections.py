@@ -1,3 +1,6 @@
+modules_path = "/home/richarwa/CarlaIngestion"
+import sys
+sys.path.append(modules_path)
 import open3d
 import numpy
 from DEM_python import DEM

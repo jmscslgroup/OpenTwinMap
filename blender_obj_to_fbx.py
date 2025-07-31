@@ -26,7 +26,7 @@ for obj in bpy.context.scene.objects:
     #obj.rotation_euler[0] = math.pi / 2
     # Original (0, 90, 0); (-90, 0, 0)
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    obj.rotation_euler = (-math.pi / 2, 0, math.pi / 2)  # 90° around Z
+    obj.rotation_euler = (-math.pi / 2, 0, -math.pi / 2)  # 90° around Z
     obj.scale = (100,100,100)
     print(obj)
 

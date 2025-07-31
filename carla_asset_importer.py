@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import concurrent.futures
 from carla_asset_dataset import CarlaAssetDataset
+from opendrive_parser import OpenDriveParser
 
 def _generateTerrainTileMethod(full_mesh_path, mesh_path, map_data, bounding_box, tile_point_interval):
     import trimesh
@@ -74,6 +75,7 @@ def _generateTerrainTileMethod(full_mesh_path, mesh_path, map_data, bounding_box
     mesh.apply_transform(R)
     '''
     
+    # Let trimesh compute vertex normals for smooth shading
     #mesh.compute_vertex_normals()
     mesh.export(full_mesh_path)
 
@@ -104,7 +106,127 @@ def _convertObjToFbxMethod(obj_path, fbx_path):
     except subprocess.CalledProcessError as e:
         raise e
 
+def _generateRoadMeshMethod(full_mesh_path, mesh_path, road, max_step=0.2, thickness = 0.2):
+    import math
+    import trimesh
+    import numpy as np
+    import os
+
+    # Limit NumPy/OpenBLAS threads
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    os.environ["OMP_NUM_THREADS"] = "1"
+    """Generate a trimesh mesh for this road.
+
+    The mesh is built by sampling points along the road reference line,
+    computing the left and right offsets based on lane widths, and extruding
+    those edges downwards by `thickness`.  Triangles are generated for
+    the top surface, bottom surface, and the sides and ends of the road.
+
+    Args:
+        thickness: thickness (depth) of the road in metres.  The road
+            surface sits at z=0 and the bottom face sits at z=-thickness.
+
+    Returns:
+        A trimesh.Trimesh object containing the vertices, faces and UVs.
+    """
+    # Sample along reference line
+    ref_samples = road.sampleReferenceLine(max_step=max_step)
+    num = len(ref_samples)
+    vertices = []
+    faces = []
+    uvs = []
+
+    # Precompute left/right widths for each sample
+    widths_lr = []
+    for s, x, y, phi in ref_samples:
+        ls = road.laneSectionAt(s)
+        lw, rw = ls.widthAt(s)
+        widths_lr.append((lw, rw))
+
+    # Build vertices and UVs: for each sample create four vertices (top left,
+    # top right, bottom left, bottom right).  We'll normalise u by road
+    # length and v by width or depth accordingly.
+    for idx, ((s, x, y, phi), (lw, rw)) in enumerate(zip(ref_samples, widths_lr)):
+        # unit normal (perpendicular to heading)
+        n_x = -math.sin(phi)
+        n_y = math.cos(phi)
+        # Top surface points
+        left_x = x + n_x * lw
+        left_y = y + n_y * lw
+        right_x = x - n_x * rw
+        right_y = y - n_y * rw
+        top_z = 0.0
+        bottom_z = -thickness
+        # Normalised coordinate along length
+        u_coord = s / road.road_length if road.road_length > 0 else 0.0
+        # Add vertices: order matters for indexing later
+        v_left_top = [left_x, left_y, top_z]
+        v_right_top = [right_x, right_y, top_z]
+        v_left_bottom = [left_x, left_y, bottom_z]
+        v_right_bottom = [right_x, right_y, bottom_z]
+        vertices.extend([v_left_top, v_right_top, v_left_bottom, v_right_bottom])
+        # UVs for these four vertices
+        # Top surface: v=0 at left, v=1 at right
+        uvs.extend([
+            [u_coord, 0.0],  # left top
+            [u_coord, 1.0],  # right top
+            [u_coord, 0.0],  # left bottom uses same v as top for simplicity
+            [u_coord, 1.0],  # right bottom
+        ])
+
+    # Build faces
+    # For each segment between consecutive samples we generate faces
+    for i in range(num - 1):
+        # base index for sample i
+        idx0 = i * 4
+        idx1 = (i + 1) * 4
+        # Indices of vertices
+        lt0, rt0, lb0, rb0 = idx0, idx0 + 1, idx0 + 2, idx0 + 3
+        lt1, rt1, lb1, rb1 = idx1, idx1 + 1, idx1 + 2, idx1 + 3
+        # Top surface (two triangles)
+        faces.append([lt0, lt1, rt1])
+        faces.append([lt0, rt1, rt0])
+        # Bottom surface (note: reverse winding for correct normals)
+        faces.append([lb0, rb0, rb1])
+        faces.append([lb0, rb1, lb1])
+        # Left side
+        faces.append([lb0, lb1, lt1])
+        faces.append([lb0, lt1, lt0])
+        # Right side
+        faces.append([rt0, rt1, rb1])
+        faces.append([rt0, rb1, rb0])
+    # Caps (start and end)
+    # Start cap: first sample index 0-3
+    lt0, rt0, lb0, rb0 = 0, 1, 2, 3
+    # Two triangles
+    faces.append([lt0, rt0, rb0])
+    faces.append([lt0, rb0, lb0])
+    # End cap: last sample indices
+    lt1, rt1, lb1, rb1 = (num - 1) * 4, (num - 1) * 4 + 1, (num - 1) * 4 + 2, (num - 1) * 4 + 3
+    faces.append([lt1, lb1, rb1])
+    faces.append([lt1, rb1, rt1])
+
+    vertices_np = np.array(vertices)
+    faces_np = np.array(faces)
+    uvs_np = np.array(uvs)
+    # Create the mesh
+    mesh = trimesh.Trimesh(vertices=vertices_np, faces=faces_np, process=False)
+    mesh.visual.uv = uvs
+    # Let trimesh compute vertex normals for smooth shading
+    #mesh.compute_vertex_normals()
+    mesh.export(full_mesh_path)
+
+    mesh_metadata = {}
+    mesh_metadata["road_data"] = road.toDict()
+    mesh_metadata["obj_path"] = mesh_path
+    mesh_metadata["fbx_path"] = mesh_metadata["obj_path"].replace(".obj", ".fbx")
+    mesh_metadata["material"] = "/Game/Carla/Static/GenericMaterials/RoadPainterMaterials/MI_Road_01.MI_Road_01"
+    return mesh_metadata
+
 class CarlaAssetImporter:
+    opendrive_data = None
     map_data = None
     cooked_path = None
     metadata = {}
@@ -127,6 +249,10 @@ class CarlaAssetImporter:
         self.metadata["carla_bounds"] = [map_data_bounds[1], map_data_bounds[0], min_z, map_data_bounds[3], map_data_bounds[2], max_z]
         del dem_data_tmp
         self.metadata["terrain"] = {}
+        self.metadata["roads"] = {}
+        self.copyXODR()
+        self.opendrive_data = OpenDriveParser(self.cooked_dataset.getFullPath(self.cooked_dataset.xodr_path))
+        self.opendrive_data.parseOpenDriveFile()
 
     def copyXODR(self):
         shutil.copy(self.map_data.getXODRPath(), self.cooked_dataset.getFullPath(self.cooked_dataset.xodr_path))
@@ -134,6 +260,9 @@ class CarlaAssetImporter:
 
     def generateTerrainPath(self, x, y):
         return os.path.join(self.cooked_dataset.terrain_mesh_path, f"{int(x*1000)}_{int(y*1000)}.obj")
+
+    def generateRoadPath(self, road):
+        return os.path.join(self.cooked_dataset.roads_mesh_path, f"{int(road.id)}.obj")
 
     def getTerrainTileBoundingBox(self, x, y):
         min_x, min_y = x, y
@@ -177,10 +306,54 @@ class CarlaAssetImporter:
                     self.metadata["terrain"][mesh_metadata["obj_path"]] = mesh_metadata
                     print(mesh_metadata["obj_path"])
 
+    def generateRoads(self, n_jobs=48):
+        roads_folder = self.cooked_dataset.getFullPath(self.cooked_dataset.roads_path)
+        os.makedirs(roads_folder, exist_ok=True)
+        mesh_folder = self.cooked_dataset.getFullPath(self.cooked_dataset.roads_mesh_path)
+        os.makedirs(mesh_folder, exist_ok=True)
+
+        jobs = []
+        for road_id in self.opendrive_data.roads:
+            road = self.opendrive_data.roads[road_id]
+            mesh_path = self.generateRoadPath(road)
+            full_mesh_path = self.cooked_dataset.getFullPath(mesh_path)
+            jobs.append([full_mesh_path, mesh_path, road])
+        
+        if n_jobs == 1:
+            for full_mesh_path, mesh_path, road in jobs:
+                mesh_metadata = _generateRoadMeshMethod(full_mesh_path, mesh_path, road)
+                self.metadata["roads"][mesh_metadata["obj_path"]] = mesh_metadata
+                print(mesh_path)
+        else:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
+                futures = [executor.submit(_generateRoadMeshMethod, full_mesh_path, mesh_path, road) for full_mesh_path, mesh_path, road in jobs]
+                
+                for future in concurrent.futures.as_completed(futures):
+                    mesh_metadata = future.result()
+                    self.metadata["roads"][mesh_metadata["obj_path"]] = mesh_metadata
+                    print(mesh_metadata["obj_path"])
+
     def convertTerrainFromObjToFbx(self, n_jobs=48):
         jobs = []
         for k in self.metadata["terrain"]:
             mesh_metadata = self.metadata["terrain"][k]
+            jobs.append([self.cooked_dataset.getFullPath(mesh_metadata["obj_path"]), self.cooked_dataset.getFullPath(mesh_metadata["fbx_path"])])
+        
+        if n_jobs == 1:
+            for obj_path, fbx_path in jobs:
+                _convertObjToFbxMethod(obj_path, fbx_path)
+                print(obj_path, fbx_path)
+        else:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
+                futures = [executor.submit(_convertObjToFbxMethod, obj_path, fbx_path) for obj_path, fbx_path in jobs]
+                
+                for future in concurrent.futures.as_completed(futures):
+                    print(future.result())
+
+    def convertRoadsFromObjToFbx(self, n_jobs=48):
+        jobs = []
+        for k in self.metadata["roads"]:
+            mesh_metadata = self.metadata["roads"][k]
             jobs.append([self.cooked_dataset.getFullPath(mesh_metadata["obj_path"]), self.cooked_dataset.getFullPath(mesh_metadata["fbx_path"])])
         
         if n_jobs == 1:

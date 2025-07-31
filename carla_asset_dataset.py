@@ -5,6 +5,8 @@ class CarlaAssetDataset:
     dataset_path = None
     terrain_path = None
     terrain_mesh_path = None
+    roads_path = None
+    roads_mesh_path = None
     xodr_path = None
     metadata_path = None
     initialized = None
@@ -15,6 +17,8 @@ class CarlaAssetDataset:
         self.dataset_path = dataset_path
         self.terrain_path = "terrain/"
         self.terrain_mesh_path = os.path.join(self.terrain_path, "meshes/")
+        self.roads_path = "roads/"
+        self.roads_mesh_path = os.path.join(self.roads_path, "meshes/")
         self.xodr_path = "map.xodr"
         self.metadata_path = "metadata.json"
         self.initialized = initialized
@@ -33,6 +37,9 @@ class CarlaAssetDataset:
 
     def getTerrainMeshesMetadata(self):
         return self.metadata["terrain"]
+
+    def getRoadMeshesMetadata(self):
+        return self.metadata["roads"]
 
     def getFullPath(self, relative_path):
         return os.path.join(self.dataset_path, relative_path)

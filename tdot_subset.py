@@ -350,7 +350,8 @@ class TDOTSubset:
         return os.path.join(self.root_folder, self.osm_path)
 
     def getCorrectedOSMPath(self):
-        return os.path.join(self.root_folder, "osm_subset_corrected.osm")
+        return os.path.join(self.root_folder, "osm_subset_corrected_all_lidar_for_elevation.osm")
+        #return os.path.join(self.root_folder, "osm_subset_corrected.osm")
 
     def getDEMPath(self, tile):
         return os.path.join(self.root_folder, self.metadata_json["tiles"][tile]["DEM"]["path"])
@@ -485,7 +486,7 @@ class TDOTSubset:
             print("No points found in bounding box.")
         else:
             median_height = np.median(points[:, 2])
-            print("Median point:", median_height)
+            #print("Median point:", median_height)
         return median_height
 
     def lidarMaxHeightAtXYMeters(self, pcd_points, xy_coord, bbox_size=1.0):

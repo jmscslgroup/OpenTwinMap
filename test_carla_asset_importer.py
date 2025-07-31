@@ -7,8 +7,9 @@ tdot_subset_path = "SubsetSelection/"
 map_data = TDOTSubset(tdot_subset_path)
 converter = CarlaAssetImporter(map_data, cooked_path)
 
-converter.copyXODR()
 #converter.generateTerrainTile(converter.metadata["bounds"][0], converter.metadata["bounds"][1])
 converter.generateTerrain()
 converter.convertTerrainFromObjToFbx()
+converter.generateRoads()
+converter.convertRoadsFromObjToFbx()
 converter.saveMetadata()

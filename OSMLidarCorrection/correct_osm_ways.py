@@ -1,3 +1,6 @@
+modules_path = "/home/richarwa/CarlaIngestion"
+import sys
+sys.path.append(modules_path)
 import osmium
 import open3d
 import pyproj
@@ -158,10 +161,12 @@ def getNearestNonBridgeHeight(tdot_subset, way_coordinates, bridge):
             current_height = way_coordinates[i][2]
     return way_coordinates
 
-def computeLidarHeightForBridges(tdot_subset, pcd_points, way_coordinates, bridge):
+def computeLidarHeight(tdot_subset, pcd_points, way_coordinates, bridge):
     for i in range(len(bridge)):
-        if bridge[i]:
-            way_coordinates[i][2] = tdot_subset.lidarMedianHeightAtXYMeters(pcd_points, [way_coordinates[i][0], way_coordinates[i][1]])
+        #if bridge[i]:
+        lidar_median_height = tdot_subset.lidarMedianHeightAtXYMeters(pcd_points, [way_coordinates[i][0], way_coordinates[i][1]])
+        if lidar_median_height is not None:
+            way_coordinates[i][2] = lidar_median_height
     return way_coordinates
 
 def convertWaysToWaysRibbons(tdot_subset, pcd_points, way_coordinates, way_bounding_box_meters, lane_count, lane_width, bridge):
@@ -175,7 +180,7 @@ def convertWaysToWaysRibbons(tdot_subset, pcd_points, way_coordinates, way_bound
         way_coordinates[i][2] = way_current_height
     # Correcting for bridges
     #way_coordinates = getNearestNonBridgeHeight(way_coordinates, bridge)
-    way_coordinates = computeLidarHeightForBridges(tdot_subset, pcd_points, way_coordinates, bridge)
+    way_coordinates = computeLidarHeight(tdot_subset, pcd_points, way_coordinates, bridge)
     #print("Expanding.....")
     expanded = ExpandCenterlineToDenseRibbon(way_coordinates, lanes=lane_count, lane_width=lane_width, width_resolution=lidar_spacing, length_resolution=lidar_spacing)
     smoothed = SmoothSavgol(expanded)
@@ -201,12 +206,14 @@ def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bo
 
     smoothed, way_coordinates = convertWaysToWaysRibbons(tdot_subset, pcd_points, way_coordinates, way_bounding_box_meters, lane_count, lane_width, bridge)
 
+    '''
     if (rng_generated == 0) or (str(wid) == "108162489") or (str(wid) == "635078708"):
         print(bridge)
         adjusted_osm_points = open3d.geometry.PointCloud()
         adjusted_osm_points.points = open3d.utility.Vector3dVector(smoothed)
         adjusted_osm_points.paint_uniform_color([0.8, 0.1, 0.1])  # greenish ribbon
         open3d.visualization.draw_geometries([pcd_points, adjusted_osm_points])
+    '''
 
     osm_process_points = open3d.geometry.PointCloud()
     osm_process_points.points = open3d.utility.Vector3dVector(smoothed)
@@ -225,12 +232,14 @@ def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bo
         fitness = reg_p2p.fitness
         rmse = reg_p2p.inlier_rmse
         
+        '''
         if (rng_generated == 0) or (str(wid) == "108162489") or (str(wid) == "635078708"):
             print(wid, i, transform, fitness,  rmse, getattr(reg_p2p, 'converged', 'unknown'))
             adjusted_osm_points = open3d.geometry.PointCloud()
             adjusted_osm_points.points = open3d.utility.Vector3dVector(np.asarray(osm_process_points.points))
             adjusted_osm_points.paint_uniform_color([0.8, 0.1, 0.1])  # redish ribbon
             open3d.visualization.draw_geometries([pcd_points, adjusted_osm_points])
+        '''
         if (reg_p2p.fitness > fitness_desire):
             transforms.append(transform)
             fitnesses.append(fitness)
@@ -285,4 +294,4 @@ if __name__ == "__main__":
     correctWaysWithLidar(tdot_subset, cores=48)
 
     print("Writing new OSM")
-    tdot_subset.osm_handler.createCorrectedOSMFile("SubsetSelection/osm_subset.osm", "SubsetSelection/osm_subset_corrected.osm")
+    tdot_subset.osm_handler.createCorrectedOSMFile("SubsetSelection/osm_subset.osm", "SubsetSelection/osm_subset_corrected_all_lidar_for_elevation.osm")
