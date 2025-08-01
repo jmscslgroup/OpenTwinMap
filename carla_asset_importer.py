@@ -7,7 +7,7 @@ import concurrent.futures
 from carla_asset_dataset import CarlaAssetDataset
 from opendrive_parser import OpenDriveParser
 
-def _generateTerrainTileMethod(full_mesh_path, mesh_path, map_data, bounding_box, tile_point_interval, original_bounds):
+def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_data, bounding_box, tile_point_interval, original_bounds):
     import trimesh
     import numpy as np
     import os
@@ -78,7 +78,6 @@ def _generateTerrainTileMethod(full_mesh_path, mesh_path, map_data, bounding_box
     #mesh.compute_vertex_normals()
     mesh.export(full_mesh_path)
 
-
     min_x, min_y, min_z = min_x_dem - original_bounds[0], min_y_dem - original_bounds[1], min_z_dem - original_bounds[2]
     max_x, max_y, max_z = max_x_dem - original_bounds[0], max_y_dem - original_bounds[1], max_z_dem - original_bounds[2]
     mesh_metadata = {}
@@ -91,6 +90,8 @@ def _generateTerrainTileMethod(full_mesh_path, mesh_path, map_data, bounding_box
     mesh_metadata["tile_point_interval"] = tile_point_interval
     mesh_metadata["obj_path"] = mesh_path
     mesh_metadata["fbx_path"] = mesh_metadata["obj_path"].replace(".obj", ".fbx")
+    mesh_metadata["name"] = os.path.splitext(os.path.basename(mesh_path))[0]
+    mesh_metadata["unreal_path"] = f'{carla_asset_root}/{mesh_metadata["name"]}'
     mesh_metadata["material"] = "/Game/Carla/Static/GenericMaterials/Ground/MI_LargeLandscape_Grass.MI_LargeLandscape_Grass"
     return mesh_metadata
 
@@ -108,7 +109,7 @@ def _convertObjToFbxMethod(obj_path, fbx_path):
     except subprocess.CalledProcessError as e:
         raise e
 
-def _generateRoadMeshMethod(full_mesh_path, mesh_path, road, max_step=0.2, thickness = 0.2):
+def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, max_step=0.2, thickness = 0.2):
     import math
     import trimesh
     import numpy as np
@@ -262,10 +263,33 @@ def _generateRoadMeshMethod(full_mesh_path, mesh_path, road, max_step=0.2, thick
     mesh_metadata["road_data"] = road.toDict()
     mesh_metadata["obj_path"] = mesh_path
     mesh_metadata["fbx_path"] = mesh_metadata["obj_path"].replace(".obj", ".fbx")
+    mesh_metadata["name"] = os.path.splitext(os.path.basename(mesh_path))[0]
+    mesh_metadata["unreal_path"] = f'{carla_asset_root}/{mesh_metadata["name"]}'
     mesh_metadata["material"] = "/Game/Carla/Static/GenericMaterials/RoadPainterMaterials/MI_Road_01.MI_Road_01"
     return mesh_metadata
 
+def _importFbxToUnrealMethodBase(ue4_root, project_path, dataset_path, asset_type, asset_names):
+    import os
+    editor_cmd = os.path.join(ue4_root, "Engine/Binaries/Linux/UE4Editor-Cmd")
+    script_name = os.path.abspath("./unreal_fbx_to_asset.py")
+    dataset_full_path = os.path.abspath(dataset_path)
+    args = [
+        editor_cmd,
+        project_path,
+        "-run=pythonscript",
+        f'-Script={script_name} {dataset_full_path} {asset_type} {" ".join(asset_names)}'
+    ]
+    print(args)
+    return subprocess.run(args, capture_output=True, text=True, check=False)
+
+def _importFbxToUnrealMethodGeneral(ue4_root, project_path, dataset_path, asset_type, asset_names, max_asset_amount=100):
+    asset_names_chunked = [asset_names[i:i+max_asset_amount] for i in range(0, len(asset_names), max_asset_amount)]
+    for chunk in asset_names_chunked:
+        _importFbxToUnrealMethodBase(ue4_root, project_path, dataset_path, asset_type, chunk)
+
 class CarlaAssetImporter:
+    ue4_root = "/home/richarwa/UnrealEngine_4.26/"
+    project_path = "/home/richarwa/carla/Unreal/CarlaUE4/CarlaUE4.uproject"
     opendrive_data = None
     map_data = None
     cooked_path = None
@@ -276,6 +300,8 @@ class CarlaAssetImporter:
     feet_to_meters = 0.3048
 
     def __init__(self, map_data, cooked_path):
+        self.metadata["map_name"] = "I24"
+        self.metadata["carla_asset_root"] = f'/Game/CarlaIngestion/{self.metadata["map_name"]}'
         self.map_data = map_data
         self.cooked_path = cooked_path
         self.cooked_dataset = CarlaAssetDataset(self.cooked_path, initialized=False)
@@ -322,21 +348,21 @@ class CarlaAssetImporter:
                 tile_bounding_box = self.getTerrainTileBoundingBox(x, y)
                 mesh_path = self.generateTerrainPath(x,y)
                 full_mesh_path = self.cooked_dataset.getFullPath(mesh_path)
-                jobs.append([full_mesh_path, mesh_path, self.map_data, tile_bounding_box, self.tile_point_interval, self.metadata["original_bounds"]])
+                jobs.append([self.metadata["carla_asset_root"], full_mesh_path, mesh_path, self.map_data, tile_bounding_box, self.tile_point_interval, self.metadata["original_bounds"]])
 
         if n_jobs == 1:
-            for full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds in jobs:
-                mesh_metadata = _generateTerrainTileMethod(full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds)
-                self.metadata["terrain"][mesh_metadata["obj_path"]] = mesh_metadata
-                print(mesh_path)
+            for carla_asset_root, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds in jobs:
+                mesh_metadata = _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds)
+                self.metadata["terrain"][mesh_metadata["name"]] = mesh_metadata
+                print(mesh_metadata["name"])
         else:
             with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
-                futures = [executor.submit(_generateTerrainTileMethod, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds) for full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds in jobs]
+                futures = [executor.submit(_generateTerrainTileMethod, carla_asset_root, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds) for carla_asset_root, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds in jobs]
                 
                 for future in concurrent.futures.as_completed(futures):
                     mesh_metadata = future.result()
-                    self.metadata["terrain"][mesh_metadata["obj_path"]] = mesh_metadata
-                    print(mesh_metadata["obj_path"])
+                    self.metadata["terrain"][mesh_metadata["name"]] = mesh_metadata
+                    print(mesh_metadata["name"])
 
     def generateRoads(self, n_jobs=100):
         roads_folder = self.cooked_dataset.getFullPath(self.cooked_dataset.roads_path)
@@ -349,21 +375,21 @@ class CarlaAssetImporter:
             road = self.opendrive_data.roads[road_id]
             mesh_path = self.generateRoadPath(road)
             full_mesh_path = self.cooked_dataset.getFullPath(mesh_path)
-            jobs.append([full_mesh_path, mesh_path, road])
+            jobs.append([self.metadata["carla_asset_root"], full_mesh_path, mesh_path, road])
         
         if n_jobs == 1:
-            for full_mesh_path, mesh_path, road in jobs:
-                mesh_metadata = _generateRoadMeshMethod(full_mesh_path, mesh_path, road)
-                self.metadata["roads"][mesh_metadata["obj_path"]] = mesh_metadata
-                print(mesh_path)
+            for carla_asset_root, full_mesh_path, mesh_path, road in jobs:
+                mesh_metadata = _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road)
+                self.metadata["roads"][mesh_metadata["name"]] = mesh_metadata
+                print(mesh_metadata["name"])
         else:
             with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
-                futures = [executor.submit(_generateRoadMeshMethod, full_mesh_path, mesh_path, road) for full_mesh_path, mesh_path, road in jobs]
+                futures = [executor.submit(_generateRoadMeshMethod, carla_asset_root, full_mesh_path, mesh_path, road) for carla_asset_root, full_mesh_path, mesh_path, road in jobs]
                 
                 for future in concurrent.futures.as_completed(futures):
                     mesh_metadata = future.result()
-                    self.metadata["roads"][mesh_metadata["obj_path"]] = mesh_metadata
-                    print(mesh_metadata["obj_path"])
+                    self.metadata["roads"][mesh_metadata["name"]] = mesh_metadata
+                    print(mesh_metadata["name"])
 
     def convertAssetTypeFromObjToFbx(self, asset_type, n_jobs=48):
         jobs = []
@@ -381,15 +407,51 @@ class CarlaAssetImporter:
                 
                 for future in concurrent.futures.as_completed(futures):
                     print(future.result())
+    
+    def clearUnrealContent(self):
+        carla_asset_root = self.metadata["carla_asset_root"]
+        editor_cmd = os.path.join(self.ue4_root, "Engine/Binaries/Linux/UE4Editor-Cmd")
+        script_name = os.path.abspath("./unreal_clear_assets.py")
+        args = [
+            editor_cmd,
+            self.project_path,
+            "-run=pythonscript",
+            f'-Script={script_name} {carla_asset_root}'
+        ]
+        print(args)
+        print(subprocess.run(args, capture_output=True, text=True, check=False))
 
     def convertAssetTypeFromFbxToUnreal(self, asset_type, n_jobs=48):
-        pass
+        total_asset_names = list(self.metadata[asset_type].keys())
+        jobs = []
+        total_asset_names_size = len(total_asset_names)
+        total_asset_names_chunk_size = int(total_asset_names_size / n_jobs) + 1
+        for i in range(n_jobs):
+            asset_names_job_chunk = total_asset_names[(i*total_asset_names_chunk_size):((i + 1)*total_asset_names_chunk_size)]
+            jobs.append([self.ue4_root, self.project_path, self.cooked_path, asset_type, asset_names_job_chunk])
 
+        if n_jobs == 1:
+            for ue4_root, project_path, dataset_path, asset_type, chunk in jobs:
+                _importFbxToUnrealMethodGeneral(ue4_root, project_path, dataset_path, asset_type, chunk)
+                print(len(chunk))
+        else:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
+                futures = [executor.submit(_importFbxToUnrealMethodGeneral, ue4_root, project_path, dataset_path, asset_type, chunk) for ue4_root, project_path, dataset_path, asset_type, chunk in jobs]
+                
+                for future in concurrent.futures.as_completed(futures):
+                    print(future.result())
+        
     def convertTerrainFromObjToFbx(self, n_jobs=48):
-        self.convertAssetTypeFromObjToFbx("terrain")
+        self.convertAssetTypeFromObjToFbx("terrain", n_jobs)
 
     def convertRoadsFromObjToFbx(self, n_jobs=48):
-        self.convertAssetTypeFromObjToFbx("roads")
+        self.convertAssetTypeFromObjToFbx("roads", n_jobs)
+
+    def convertTerrainFromFbxToUnreal(self, n_jobs=48):
+        self.convertAssetTypeFromFbxToUnreal("terrain", n_jobs)
+
+    def convertRoadsFromFbxToUnreal(self, n_jobs=48):
+        self.convertAssetTypeFromFbxToUnreal("roads", n_jobs)
 
     def saveMetadata(self):
         with open(self.cooked_dataset.getFullPath(self.cooked_dataset.metadata_path), "w") as f:
