@@ -20,7 +20,7 @@ class CarlaAssetDataset:
         self.roads_path = "roads/"
         self.roads_mesh_path = os.path.join(self.roads_path, "meshes/")
         self.xodr_path = "map.xodr"
-        self.metadata_path = "metadata.json"
+        self.metadata_path = os.path.join(self.dataset_path, "metadata.json")
         self.initialized = initialized
         if self.initialized:
             self._loadMetadata()
