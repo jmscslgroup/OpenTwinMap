@@ -1,4 +1,4 @@
-from carla_asset_creator import CarlaAssetCreator
+from .carla_asset_creator import CarlaAssetCreator
 from tdot_subset import TDOTSubset
 
 cooked_path = "CarlaCooked/"

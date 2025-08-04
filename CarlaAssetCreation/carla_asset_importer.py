@@ -1,11 +1,11 @@
 import os
 import subprocess
 import concurrent.futures
-from carla_asset_dataset import CarlaAssetDataset
+from .carla_asset_dataset import CarlaAssetDataset
 
 def _importFbxToUnrealMethodBase(ue4_root, project_path, dataset_path, asset_type, asset_names):
     editor_cmd = os.path.join(ue4_root, "Engine/Binaries/Linux/UE4Editor-Cmd")
-    script_name = os.path.abspath("./unreal_fbx_to_asset.py")
+    script_name = os.path.abspath(os.path.join(os.path.dirname(__file__), "./unreal_fbx_to_asset.py"))
     dataset_full_path = os.path.abspath(dataset_path)
     args = [
         editor_cmd,
@@ -34,7 +34,7 @@ class CarlaAssetImporter:
     def clearUnrealContent(self):
         carla_asset_root = self.dataset.metadata["carla_asset_root"]
         editor_cmd = os.path.join(self.ue4_root, "Engine/Binaries/Linux/UE4Editor-Cmd")
-        script_name = os.path.abspath("./unreal_clear_assets.py")
+        script_name = os.path.abspath(os.path.join(os.path.dirname(__file__), "./unreal_clear_assets.py"))
         args = [
             editor_cmd,
             self.project_path,

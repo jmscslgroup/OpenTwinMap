@@ -1,7 +1,7 @@
 import os
 import json
 import open3d
-from carla_asset_dataset import CarlaAssetDataset
+from CarlaAssetCreation.carla_asset_dataset import CarlaAssetDataset
 
 class CarlaAssetVisualization:
     dataset_path = None

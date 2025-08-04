@@ -4,8 +4,8 @@ import numpy as np
 import shutil
 import subprocess
 import concurrent.futures
-from carla_asset_dataset import CarlaAssetDataset
-from opendrive_parser import OpenDriveParser
+from .carla_asset_dataset import CarlaAssetDataset
+from .opendrive_parser import OpenDriveParser
 
 def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_data, bounding_box, tile_point_interval, original_bounds):
     import trimesh
@@ -96,7 +96,7 @@ def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_
     return mesh_metadata
 
 def _convertObjToFbxMethod(obj_path, fbx_path):
-    convert_script_path = "./blender_obj_to_fbx.py"
+    convert_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "./blender_obj_to_fbx.py"))
     try:
         result = subprocess.run(
             ["blender", "--background", "--python", convert_script_path, "--", obj_path, fbx_path],
