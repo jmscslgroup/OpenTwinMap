@@ -149,8 +149,8 @@ class WayNodeCollectorNodeBoundClipping(osmium.SimpleHandler):
                     node2_location = self.nodes[node2]["coordinates"]
                     if not self.containsPoint(node2_location):
                         node2_corrected_location = self.getCorrectedSecondNodeCoordinate(node1_location, node2_location)
-                        self.nodes[node2]["coordinates"] = node2_corrected_location
-                        print(f"Node {node2} corrected to {node2_corrected_location}")
+                        self.nodes[node1]["corrected_coordinates"] = node2_corrected_location
+                        print(f"Node {node1} corrected to {node2_corrected_location}")
 
     def removeExternalPoints(self):
         for node in self.nodes:
@@ -170,7 +170,7 @@ class WayNodeCollectorNodeBoundClipping(osmium.SimpleHandler):
         # 2. Update coordinates of inside nodes
         for node in root.findall('node'):
             n_id = str(node.get('id'))
-            lon, lat = self.nodes[n_id]["coordinates"]
+            lon, lat = self.nodes[n_id]["corrected_coordinates"] if "corrected_coordinates" in self.nodes[n_id] else self.nodes[n_id]["coordinates"]
             node.set('lon', str(lon))
             node.set('lat', str(lat))
 
@@ -182,8 +182,9 @@ class WayNodeCollectorNodeBoundClipping(osmium.SimpleHandler):
                 if ref in self.outside_points:
                     way.remove(nd)
 
-            # Optional: remove empty ways
-            if not way.findall('nd'):
+            # Optional: remove empty-low node count ways
+            if len(way.findall('nd')) < 2:
+                print(f"Removing way {way}")
                 root.remove(way)
 
         return tree
@@ -255,7 +256,7 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
                 self.node_graph.add_edge(node1, node2)
             self.ways[w_id] = self.ways_original[w_id].copy()
     
-    def generateImplicitWays(self, node_count=15, distance_bound=250, cores=48):
+    def generateImplicitWays(self, node_count=8, distance_bound=200, cores=48):
         all_segments = []
 
         def findPathsFromSource(node_graph, source, node_count):
@@ -678,6 +679,7 @@ class TDOTSubset:
         tile_list = subset["tiles"]
         print(tile_list)
         
+        """
         parallel_result = joblib.Parallel(n_jobs=2, backend="multiprocessing")(joblib.delayed(downloadOSM)(osm_folder, metadata, tile) for tile in tile_list)
 
         commands = ["osmium", "merge"]
@@ -688,6 +690,7 @@ class TDOTSubset:
         commands.append("-o")
         commands.append(merged_osm_original)
         subprocess.run(commands, shell=False)
+        """
         
 
         min_long, min_lat, max_long, max_lat = getFinalOSMBound(metadata, tile_list)
@@ -770,12 +773,12 @@ if __name__ == "__main__":
     subset_path = "./compile_subset.json"
     subset_folder = "SubsetSelection"
 
-    os.makedirs(subset_folder, exist_ok=True)
-    print("Compiling metadata")
-    TDOTSubset.compileMetadata(metadata_path, subset_path, subset_folder)
+    #os.makedirs(subset_folder, exist_ok=True)
+    #print("Compiling metadata")
+    #TDOTSubset.compileMetadata(metadata_path, subset_path, subset_folder)
     print("Compiling OSM")
     TDOTSubset.compileOSMSubset(metadata_path, subset_path, subset_folder)
-    print("Compiling DEM")
-    TDOTSubset.compileDEMSubset(metadata_path, subset_path, subset_folder)
-    print("Compiling LIDAR")
-    TDOTSubset.compileLidarSubset(metadata_path, subset_path, subset_folder)
+    #print("Compiling DEM")
+    #TDOTSubset.compileDEMSubset(metadata_path, subset_path, subset_folder)
+    #print("Compiling LIDAR")
+    #TDOTSubset.compileLidarSubset(metadata_path, subset_path, subset_folder)

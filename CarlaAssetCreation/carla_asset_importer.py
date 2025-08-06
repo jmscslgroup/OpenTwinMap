@@ -16,7 +16,7 @@ def _importFbxToUnrealMethodBase(ue4_root, project_path, dataset_path, asset_typ
     print(args)
     return subprocess.run(args, capture_output=True, text=True, check=False)
 
-def _importFbxToUnrealMethodGeneral(ue4_root, project_path, dataset_path, asset_type, asset_names, max_asset_amount=100):
+def _importFbxToUnrealMethodGeneral(ue4_root, project_path, dataset_path, asset_type, asset_names, max_asset_amount=5000):
     asset_names_chunked = [asset_names[i:i+max_asset_amount] for i in range(0, len(asset_names), max_asset_amount)]
     for chunk in asset_names_chunked:
         _importFbxToUnrealMethodBase(ue4_root, project_path, dataset_path, asset_type, chunk)
@@ -64,8 +64,8 @@ class CarlaAssetImporter:
                 for future in concurrent.futures.as_completed(futures):
                     print(future.result())
 
-    def convertTerrainFromFbxToUnreal(self, n_jobs=48):
+    def convertTerrainFromFbxToUnreal(self, n_jobs=1):
         self.convertAssetTypeFromFbxToUnreal("terrain", n_jobs)
 
-    def convertRoadsFromFbxToUnreal(self, n_jobs=48):
-        self.convertAssetTypeFromFbxToUnreal("roads", n_jobs)
+    def convertRoadsFromFbxToUnreal(self, n_jobs=1):
+        self.convertAssetTypeFromFbxToUnreal("merged_roads", n_jobs)

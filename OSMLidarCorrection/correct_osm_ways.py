@@ -163,10 +163,10 @@ def getNearestNonBridgeHeight(tdot_subset, way_coordinates, bridge):
 
 def computeLidarHeight(tdot_subset, pcd_points, way_coordinates, bridge):
     for i in range(len(bridge)):
-        #if bridge[i]:
-        lidar_median_height = tdot_subset.lidarMedianHeightAtXYMeters(pcd_points, [way_coordinates[i][0], way_coordinates[i][1]])
-        if lidar_median_height is not None:
-            way_coordinates[i][2] = lidar_median_height
+        if bridge[i]:
+            lidar_median_height = tdot_subset.lidarMedianHeightAtXYMeters(pcd_points, [way_coordinates[i][0], way_coordinates[i][1]])
+            if lidar_median_height is not None:
+                way_coordinates[i][2] = lidar_median_height
     return way_coordinates
 
 def convertWaysToWaysRibbons(tdot_subset, pcd_points, way_coordinates, way_bounding_box_meters, lane_count, lane_width, bridge):
@@ -183,6 +183,8 @@ def convertWaysToWaysRibbons(tdot_subset, pcd_points, way_coordinates, way_bound
     way_coordinates = computeLidarHeight(tdot_subset, pcd_points, way_coordinates, bridge)
     #print("Expanding.....")
     expanded = ExpandCenterlineToDenseRibbon(way_coordinates, lanes=lane_count, lane_width=lane_width, width_resolution=lidar_spacing, length_resolution=lidar_spacing)
+    if (len(expanded) == 0):
+        return expanded, way_coordinates
     smoothed = SmoothSavgol(expanded)
     return smoothed, way_coordinates
 
@@ -205,7 +207,9 @@ def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bo
         return (np.eye(4), 0.0, way_coordinates)
 
     smoothed, way_coordinates = convertWaysToWaysRibbons(tdot_subset, pcd_points, way_coordinates, way_bounding_box_meters, lane_count, lane_width, bridge)
-
+    if (len(smoothed) == 0):
+        print("Way not long enough, returning identity")
+        return (np.eye(4), 0.0, way_coordinates)
     '''
     if (rng_generated == 0) or (str(wid) == "108162489") or (str(wid) == "635078708"):
         print(bridge)
