@@ -113,7 +113,7 @@ def _convertObjToFbxMethod(obj_path, fbx_path):
     except subprocess.CalledProcessError as e:
         raise e
 
-def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, original_bounds, max_step=0.1, thickness = 0.2):
+def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, original_bounds, max_step=0.1, thickness = 0.5):
     import math
     import trimesh
     import numpy as np
@@ -292,7 +292,7 @@ def _generateMergedRoadMethod(carla_asset_root, group, name, full_mesh_path, mes
     for group_key in group:
         group_entry = group[group_key]
         current_mesh = trimesh.load(group_entry["full_mesh_path"], force="mesh")
-        min_y_diff, min_x_diff, min_z_diff = group_entry["min_y"] - min_y, group_entry["min_x"] - min_x, group_entry["min_z"]
+        min_y_diff, min_x_diff, min_z_diff = group_entry["min_y"] - min_y, group_entry["min_x"] - min_x, group_entry["min_z"] - min_z
         # Define the translation vector (x, y, z)
         translation_vector = np.array([min_y_diff, min_x_diff, min_z_diff])  # Example: move 5 units in x, -2 units in z
 
