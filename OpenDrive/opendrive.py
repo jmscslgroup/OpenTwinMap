@@ -1605,7 +1605,7 @@ class OpenDRIVE:
     junctions and controllers.
     """
     header: Header
-    roads: List[Road] = field(default_factory=list)
+    roads: Dict[Road] = field(default_factory=dict)
     junctions: List[Junction] = field(default_factory=list)
     controllers: List[Controller] = field(default_factory=list)
 
@@ -1615,7 +1615,7 @@ class OpenDRIVE:
         elem.append(self.header.toXML())
         # roads
         for r in self.roads:
-            elem.append(r.toXML())
+            elem.append(self.roads[r].toXML())
         # junctions
         for j in self.junctions:
             elem.append(j.toXML())
@@ -1632,7 +1632,10 @@ class OpenDRIVE:
         if header_elem is None:
             raise ValueError("OpenDRIVE element must contain <header>")
         header = Header.fromXML(header_elem)
-        roads = [Road.fromXML(r) for r in element.findall("road")]
+        roads = {}
+        for r in element.findall("road"):
+            road = Road.fromXML(r)
+            roads[road.id] = road
         junctions = [Junction.fromXML(j) for j in element.findall("junction")]
         controllers = [Controller.fromXML(c) for c in element.findall("controller")]
         return cls(header=header, roads=roads, junctions=junctions, controllers=controllers)
