@@ -897,7 +897,7 @@ class Lane:
     Only a subset of the attributes and child records are implemented here.
     """
     id: int
-    type: str
+    type: Optional[str] = None
     level: Optional[bool] = None
     link: Optional[LaneLink] = None
     widths: List[Width] = field(default_factory=list)
@@ -913,7 +913,8 @@ class Lane:
     def toXML(self) -> ET.Element:
         elem = ET.Element("lane")
         elem.set("id", str(self.id))
-        elem.set("type", self.type)
+        if self.type is not None:
+            elem.set("type", self.type)
         if self.level is not None:
             elem.set("level", "true" if self.level else "false")
         # link
@@ -943,7 +944,7 @@ class Lane:
     @classmethod
     def fromXML(cls: Type[T], element: ET.Element) -> T:
         lane_id = _get_attrib(element, "id", int, 0)
-        lane_type = _get_attrib(element, "type", str, "")
+        lane_type = _get_attrib(element, "type", str, None)
         level_attr = element.get("level")
         level = None
         if level_attr is not None:
