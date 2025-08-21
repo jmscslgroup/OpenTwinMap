@@ -43,6 +43,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
     resolution = None
     nodes = {}
     ways = {}
+    junctions = {}
     opendrive_id_count = 0
 
     def __init__(self, dataset, resolution=0.1):
@@ -69,13 +70,14 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         self.nodes[n_id] = {
             "nid": n_id,
             "node_data": n,
-            "meters_coordinates": meters_coordinates
+            "meters_coordinates": meters_coordinates,
+            "connected_ways": [],
+            "junction_id": "-1"
         }
 
     def way(self, w):
         w_id = str(w.id)
         if 'highway' in w.tags:
-            lanes_forward = ("lanes:forward" in w.tags)
             oneway = ("oneway" in w.tags) and (w.tags["oneway"] == "yes")
             bridge = ("bridge" in w.tags) and (w.tags["bridge"] == "yes")
             lane_width_by_highway = {
@@ -102,6 +104,8 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                 nodes.append(n_ref)
             lane_backward = int(w.tags["lanes:backward"]) if "lanes:backward" in w.tags else int(lane_count / 2)
             lane_forward = int(w.tags["lanes:forward"]) if "lanes:forward" in w.tags else int(lane_count / 2)
+            lane_backward_turn = w.tags["turn:lanes:backward"] if "turn:lanes:backward" in w.tags else ""
+            lane_forward_turn = w.tags["turn:lanes:forward"] if "turn:lanes:forward" in w.tags else ""
             if oneway:
                 lane_backward = 0
                 lane_forward = lane_count
@@ -115,14 +119,62 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                 "oneway": oneway,
                 "lane_count_backward": lane_backward,
                 "lane_count_forward": lane_forward,
+                "lane_turn_backward": lane_backward_turn,
+                "lane_turn_forward": lane_forward_turn,
                 "nodes": nodes,
-                "wid": w_id
+                "wid": w_id,
+                "connected_ways": [],
+                "predecessor_way": None,
+                "successor_way": None,
+                "opendrive_id": self.generateOpenDriveID()
             }
             self.ways[w_id] = way
 
     def readOSM(self):
         self.apply_file(self.dataset.getOSMPath())
+        self.annotateNodesWithWays()
+        self.detectConnectedWays()
+        self.detectJunctions()
 
+    def annotateNodesWithWays(self):
+        for wid in self.ways:
+            way = self.ways[wid]
+            for nid in way["nodes"]:
+                node = self.nodes[nid]
+                node["connected_ways"].append(wid)
+
+    def detectConnectedWays(self):
+        for wid in self.ways:
+            way = self.ways[wid]
+            beginning_node = way["nodes"][0]
+            ending_node = way["nodes"][-1]
+            nodes_of_interest = [beginning_node, ending_node]
+            for nid in nodes_of_interest:
+                node = self.nodes[nid]
+                #At least one other way!
+                if len(node["connected_ways"]) > 1:
+                    for entry in node["connected_ways"]:
+                        if entry != wid:
+                            way["connected_ways"].append(entry)
+                            if nid == beginning_node:
+                                way["predecessor_way"] = entry
+                            elif nid == ending_node:
+                                way["successor_way"] = entry
+
+    def detectJunctions(self):
+        for nid in self.nodes:
+            node = self.nodes[nid]
+            # Junction!
+            if len(node["connected_ways"]) > 2:
+                junction_id = self.generateOpenDriveID()
+                junction_data = {
+                    "ways": node["connected_ways"],
+                    "id": junction_id,
+                    "node_id": nid
+                }
+                self.junctions[junction_id] = junction_data
+                node["junction_id"] = junction_id
+    
     def generateOpenDriveHeader(self):
         geoReference = opendrive.GeoReference(proj4="<![CDATA[+proj=tmerc +lat_0={0:0.10f} +lon_0={1:0.10f} +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs]]>".format(self.bounds_coords[0], self.bounds_coords[1]))
         return opendrive.Header(revMajor=1, revMinor=4, north=self.bounds_meters[3]-self.bounds_meters[1], south=0.0, east=self.bounds_meters[2]-self.bounds_meters[0], west=0.0, geoReference=geoReference)
@@ -205,13 +257,39 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         lane_sections = self.generateLaneSectionsFromOSMWayData(way_data)
 
         return opendrive.Lanes(laneOffsets=lane_offsets, laneSections=lane_sections)
+    
+    def generateRoadLinkageFromOSMWayData(self, way_data):
+        # Generate predecessor
+        predecessor = None
+        if way_data["predecessor_way"] != None:
+            predecessor_way = self.ways[way_data["predecessor_way"]]
+            shared_nid = list(set(way_data["nodes"]) & set(predecessor_way["nodes"]))[0]
+            shared_node = self.nodes[shared_nid]
+            predecessor_type = "junction" if (shared_node["junction_id"] != "-1") else "road"
+            element_id = predecessor_way["opendrive_id"] if (predecessor_type == "road") else shared_node["junction_id"]
+            predecessor = opendrive.PredecessorSuccessor(elementType=predecessor_type, elementId=element_id, tag="predecessor")
+            if predecessor_type == "junction":
+                predecessor = None
+        # Generate successor
+        successor = None
+        if way_data["successor_way"] != None:
+            successor_way = self.ways[way_data["successor_way"]]
+            shared_nid = list(set(way_data["nodes"]) & set(successor_way["nodes"]))[0]
+            shared_node = self.nodes[shared_nid]
+            successor_type = "junction" if (shared_node["junction_id"] != "-1") else "road"
+            element_id = successor_way["opendrive_id"] if (successor_way == "road") else shared_node["junction_id"]
+            successor = opendrive.PredecessorSuccessor(elementType=successor_type, elementId=element_id, tag="successor")
+            if successor_type == "junction":
+                successor = None
+        return opendrive.Link(predecessor=predecessor, successor=successor)
 
     def generateRoadFromOSMWay(self, wid):
         way_data = self.ways[wid]
-        id = self.generateOpenDriveID()
+        id = self.ways[wid]["opendrive_id"]
         planView, road_length = self.generatePlanViewFromOSMWayData(way_data)
         lanes = self.generateLanesFromOSMWayData(way_data)
-        return opendrive.Road(id=id, length=road_length, planView=planView, lanes=lanes)
+        linkage = self.generateRoadLinkageFromOSMWayData(way_data)
+        return opendrive.Road(id=id, length=road_length, planView=planView, lanes=lanes, link=linkage)
     
     def generateRoadsFromOSMWays(self):
         roads = {}

@@ -1520,7 +1520,7 @@ class Road:
     id: str
     length: float
     name: Optional[str] = None
-    junction: Optional[str] = None
+    junction: Optional[str] = "-1"
     rule: Optional[str] = None
     link: Optional[Link] = None
     types: List[RoadType] = field(default_factory=list)
