@@ -464,6 +464,73 @@ class Geometry:
             raise NotImplementedError(f"Unsupported geometry type: {self.shape}")
         return np.array(positions)
 
+    def projectXYToS(self, x, y):
+        s_local = None
+        dist = None
+        if isinstance(self.shape, Line):
+            # Direction vector
+            dx = math.cos(self.hdg)
+            dy = math.sin(self.hdg)
+            # Projection of point onto the infinite line
+            relx = x - self.x
+            rely = y - self.y
+            proj = relx * dx + rely * dy
+            proj_clamped = max(0.0, min(self.length, proj))
+            # Closest point coordinates
+            cx = self.x + dx * proj_clamped
+            cy = self.y + dy * proj_clamped
+            # Distance from point to line
+            dist = math.hypot(x - cx, y - cy)
+            s_local = proj_clamped
+        elif isinstance(self.shape, Arc):
+            k = self.shape.curvature
+            # Treat nearly zero curvature as a line
+            if abs(k) < 1e-12:
+                # Same as line
+                dx = math.cos(self.hdg)
+                dy = math.sin(self.hdg)
+                relx = x - self.x
+                rely = y - self.y
+                proj = relx * dx + rely * dy
+                proj_clamped = max(0.0, min(self.length, proj))
+                cx = x0 + dx * proj_clamped
+                cy = y0 + dy * proj_clamped
+                dist = math.hypot(x - cx, y - cy)
+                s_local = proj_clamped
+            else:
+                R = 1.0 / k
+                # Normal vector to heading (left turn if k > 0)
+                nx = -math.sin(self.hdg)
+                ny = math.cos(self.hdg)
+                # Center of curvature
+                cx0 = self.x + nx * R
+                cy0 = self.y + ny * R
+                # Start angle of the arc
+                phi_start = math.atan2(self.y - cy0, self.x - cx0)
+                # Angular extent of the arc
+                dphi = k * self.length
+                # Angle of the point relative to center
+                phi_point = math.atan2(y - cy0, x - cx0)
+                # Compute difference and clamp to arc range
+                # Normalize to [-pi, pi]
+                delta = (phi_point - phi_start + math.pi) % (2 * math.pi) - math.pi
+                # Clamp delta into [0, dphi] if dphi >= 0 else [dphi, 0]
+                if dphi >= 0.0:
+                    delta_clamped = max(0.0, min(dphi, delta))
+                else:
+                    delta_clamped = min(0.0, max(dphi, delta))
+                phi_clamped = phi_start + delta_clamped
+                # Closest point on arc
+                cx = cx0 + R * math.cos(phi_clamped)
+                cy = cy0 + R * math.sin(phi_clamped)
+                # Distance from point to arc
+                dist = math.hypot(x - cx, y - cy)
+                # s along arc = delta_clamped / k
+                s_local = delta_clamped / k
+        else:
+            raise NotImplementedError(f"Unsupported geometry type: {self.shape}")
+        return self.s + s_local, dist
+
 @dataclass
 class PlanView:
     """Container for a sequence of geometry segments."""

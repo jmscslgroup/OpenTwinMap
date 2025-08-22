@@ -42,19 +42,21 @@ class OSMToOpenDrive(osmium.SimpleHandler):
     bounds_meters = None
     bounds_coords = None
     proj = None
-    resolution = None
+    reference_line_resolution = None
+    elevation_line_max_length = None
     dem_data = None
     nodes = {}
     ways = {}
     junctions = {}
     opendrive_id_count = 0
 
-    def __init__(self, dataset, resolution=0.1):
+    def __init__(self, dataset, reference_line_resolution=0.1, elevation_line_max_length=200.0):
         self.dataset = dataset
         self.bounds_meters = self.dataset.getBoundsInMeters()
         self.bounds_coords = self.dataset.getBoundsInCoords()
         self.proj = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:6576", always_xy=True)
-        self.resolution = resolution
+        self.reference_line_resolution = reference_line_resolution
+        self.elevation_line_max_length = elevation_line_max_length
         self.dem_data = self.dataset.loadDEMs(self.dataset.getAllTiles())
 
     def projectToMeters(self, coordinates, fix_to_origin=True):
@@ -287,23 +289,68 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         elevations = []
         for position in positions:
             elevations.append(self.dataset.minHeightAtXYMeters(self.dem_data, (position[1] + self.bounds_meters[0], position[2] + self.bounds_meters[1])))
-        return elevations
+        return np.array(elevations)
     
     def regressElevationEquationFromReferenceLine(self, positions, elevations):
+        print(positions[:, 0].min(), elevations.min(), positions[:, 0].max(), elevations.max())
+        degree = len(positions) if len(positions) < 4 else 4
         s0 = positions[0][0]
+        if degree == 1:
+            return opendrive.Elevation(s=s0, a=elevations[0], b=0.0, c=0.0, d=0.0)
         L = positions[-1][0]
         sn = (positions[:, 0] / L)
-
-        def model(sn, a, b):
-            s = s0 + L*sn
-            return a + b*s
-        coeff, _ = curve_fit(model, sn, elevations)
-        print(coeff)
-        return opendrive.Elevation(s=s0, a=coeff[0], b=coeff[1], c=0.0, d=0.0)
+        coeff = None
+        if degree == 2:
+            def model(sn, a, b):
+                s = s0 + L*sn
+                return a + b*s
+            coeff, _ = curve_fit(model, sn, elevations)
+            coeff = np.array([coeff[0], coeff[1], 0.0, 0.0])
+            print(coeff)
+        elif degree == 3:
+            def model(sn, a, b, c):
+                s = s0 + L*sn
+                return a + b*s + c*(s**2)
+            coeff, _ = curve_fit(model, sn, elevations)
+            coeff = np.array([coeff[0], coeff[1], coeff[2], 0.0])
+            print(coeff)
+        else:
+            def model(sn, a, b, c, d):
+                s = s0 + L*sn
+                return a + b*s + c*(s**2) + d*(s**3)
+            coeff, _ = curve_fit(model, sn, elevations)
+            coeff = np.array([coeff[0], coeff[1], coeff[2], coeff[3]])
+            print(coeff)
+        return opendrive.Elevation(s=s0, a=coeff[0], b=coeff[1], c=coeff[2], d=coeff[3])
+    
+    def generateElevationSequencesFromReferenceline(self, positions, elevations):
+        position_elevation_splits = []
+        elevation_entries = []
+        current_position_split = []
+        current_elevation_split = []
+        for position, elevation in zip(positions, elevations):
+            position_s, position_x, position_y, position_phi = position
+            '''
+            if int(position_s / self.elevation_line_max_length) > len(position_elevation_splits):
+                current_position_split = np.array(current_position_split)
+                current_elevation_split = np.array(current_elevation_split)
+                position_elevation_splits.append([current_position_split, current_elevation_split])
+                current_position_split = []
+                current_elevation_split = []
+            '''
+            current_position_split.append(position)
+            current_elevation_split.append(elevation)
+        if len(current_position_split) > 0:
+            current_position_split = np.array(current_position_split)
+            current_elevation_split = np.array(current_elevation_split)
+            position_elevation_splits.append([current_position_split, current_elevation_split])
+        for (position_split, elevation_split) in position_elevation_splits:
+            elevation_entries.append(self.regressElevationEquationFromReferenceLine(position_split, elevation_split))
+        return elevation_entries
     
     def generateElevationProfileFromOSMWayData(self, way_data, plan_view, road_length):
         elevations = []
-        positions = plan_view.sampleReferenceLine(self.resolution)
+        positions = plan_view.sampleReferenceLine(self.reference_line_resolution)
         elevations_reference_line = None
         # For bridges we linearly interpolate between the elevations given from the start to the end
         # We assume bridges do not dip, or curve up significantly between nodes.
@@ -317,7 +364,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             elevations_reference_line = np.array([beginning_node_coordinates[2], ending_node_coordinates[2]])
         else:
             elevations_reference_line = self.getDEMElevationsAtPoints(positions)
-        elevations.append(self.regressElevationEquationFromReferenceLine(positions, elevations_reference_line))
+        elevations = self.generateElevationSequencesFromReferenceline(positions, elevations_reference_line)
         return opendrive.ElevationProfile(elevations=elevations)
 
     def generateRoadFromOSMWay(self, wid):
