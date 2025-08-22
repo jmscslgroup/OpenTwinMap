@@ -1,6 +1,8 @@
 import osmium
 import pyproj
 import numpy as np
+import math
+from scipy.optimize import curve_fit
 from . import opendrive
 
 def _generatePairs(items):
@@ -41,6 +43,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
     bounds_coords = None
     proj = None
     resolution = None
+    dem_data = None
     nodes = {}
     ways = {}
     junctions = {}
@@ -52,6 +55,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         self.bounds_coords = self.dataset.getBoundsInCoords()
         self.proj = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:6576", always_xy=True)
         self.resolution = resolution
+        self.dem_data = self.dataset.loadDEMs(self.dataset.getAllTiles())
 
     def projectToMeters(self, coordinates, fix_to_origin=True):
         x, y, z = coordinates[0], coordinates[1], coordinates[2]
@@ -268,8 +272,6 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             predecessor_type = "junction" if (shared_node["junction_id"] != "-1") else "road"
             element_id = predecessor_way["opendrive_id"] if (predecessor_type == "road") else shared_node["junction_id"]
             predecessor = opendrive.PredecessorSuccessor(elementType=predecessor_type, elementId=element_id, tag="predecessor")
-            if predecessor_type == "junction":
-                predecessor = None
         # Generate successor
         successor = None
         if way_data["successor_way"] != None:
@@ -279,17 +281,41 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             successor_type = "junction" if (shared_node["junction_id"] != "-1") else "road"
             element_id = successor_way["opendrive_id"] if (successor_way == "road") else shared_node["junction_id"]
             successor = opendrive.PredecessorSuccessor(elementType=successor_type, elementId=element_id, tag="successor")
-            if successor_type == "junction":
-                successor = None
         return opendrive.Link(predecessor=predecessor, successor=successor)
+    
+    def getElevationsAtPoints(self, positions):
+        elevations = []
+        for position in positions:
+            elevations.append(self.dataset.minHeightAtXYMeters(self.dem_data, (position[1] + self.bounds_meters[0], position[2] + self.bounds_meters[1])))
+        return elevations
+    
+    def regressElevationEquationFromReferenceLine(self, positions, elevations):
+        s0 = positions[0][0]
+        L = positions[-1][0]
+        sn = (positions[:, 0] / L)
+
+        def model(sn, a, b, c, d):
+            s = s0 + L*sn
+            return a + b*s + c*(s**2) + d*(s**3)
+        coeff, _ = curve_fit(model, sn, elevations)
+        print(coeff)
+        return opendrive.Elevation(s=s0, a=coeff[0], b=coeff[1], c=coeff[2], d=coeff[3])
+    
+    def generateElevationProfileFromOSMWayData(self, way_data, plan_view):
+        elevations = []
+        positions = plan_view.sampleReferenceLine(self.resolution)
+        elevations_reference_line = self.getElevationsAtPoints(positions)
+        elevations.append(self.regressElevationEquationFromReferenceLine(positions, elevations_reference_line))
+        return opendrive.ElevationProfile(elevations=elevations)
 
     def generateRoadFromOSMWay(self, wid):
         way_data = self.ways[wid]
         id = self.ways[wid]["opendrive_id"]
-        planView, road_length = self.generatePlanViewFromOSMWayData(way_data)
+        plan_view, road_length = self.generatePlanViewFromOSMWayData(way_data)
+        elevation_profile = self.generateElevationProfileFromOSMWayData(way_data, plan_view)
         lanes = self.generateLanesFromOSMWayData(way_data)
         linkage = self.generateRoadLinkageFromOSMWayData(way_data)
-        return opendrive.Road(id=id, length=road_length, planView=planView, lanes=lanes, link=linkage)
+        return opendrive.Road(id=id, length=road_length, planView=plan_view, elevationProfile=elevation_profile, lanes=lanes, link=linkage)
     
     def generateRoadsFromOSMWays(self):
         roads = {}
@@ -297,8 +323,20 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             road = self.generateRoadFromOSMWay(wid)
             roads[road.id] = road
         return roads
+    
+    def generateJunctionsFromOSMNodes(self):
+        junctions = []
+        for nid in self.nodes:
+            node = self.nodes[nid]
+            junction_id = node["junction_id"]
+            if junction_id != "-1":
+                connections = []
+                #opendrive.Connection()
+                junctions.append(opendrive.Junction(id=junction_id, name=junction_id, type="default", connections=connections))
+        return junctions
 
     def convertToOpenDrive(self):
         header = self.generateOpenDriveHeader()
         roads = self.generateRoadsFromOSMWays()
-        return opendrive.OpenDRIVE(header=header, roads=roads)
+        junctions = self.generateJunctionsFromOSMNodes()
+        return opendrive.OpenDRIVE(header=header, roads=roads, junctions=junctions)

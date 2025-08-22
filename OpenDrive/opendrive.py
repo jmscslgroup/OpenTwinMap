@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, Optional, Type, TypeVar, Dict
+import math
+import numpy as np
 import xml.etree.ElementTree as ET
 
 T = TypeVar("T")
@@ -410,7 +412,57 @@ class Geometry:
             length=_get_attrib(element, "length", float, 0.0),
             shape=shape,
         )
+    
+    def samplePositions(self, num_samples):
+        """Sample (x, y, phi) positions along this geometry.
 
+        Args:
+            num_samples: number of samples to generate along the geometry,
+                including both endpoints.
+
+        Returns:
+            A list of tuples (x, y, phi) where phi is the orientation at the
+            sampled point.
+        """
+        if num_samples < 2:
+            raise ValueError("num_samples must be >= 2")
+        positions = []
+        if isinstance(self.shape, Line):
+            # Straight line: phi is constant
+            for i in range(num_samples):
+                ds = (self.length) * i / (num_samples - 1)
+                x = self.x + ds * math.cos(self.hdg)
+                y = self.y + ds * math.sin(self.hdg)
+                phi = self.hdg
+                positions.append((x, y, phi))
+        elif isinstance(self.shape, Arc):
+            # Circular arc: curvature k defines radius = 1/k
+            k = self.shape.curvature
+            # avoid division by zero; treat near zero curvature as straight line
+            if abs(k) < 1e-8:
+                for i in range(num_samples):
+                    ds = (self.length) * i / (num_samples - 1)
+                    x = self.x + ds * math.cos(self.hdg)
+                    y = self.y + ds * math.sin(self.hdg)
+                    phi = self.hdg
+                    positions.append((x, y, phi))
+            else:
+                radius = 1.0 / k
+                # Starting orientation
+                phi0 = self.hdg
+                # Centre of the circle
+                cx = self.x - radius * math.sin(phi0)
+                cy = self.y + radius * math.cos(phi0)
+                for i in range(num_samples):
+                    ds = (self.geom_length) * i / (num_samples - 1)
+                    # angle change along the arc
+                    phi = phi0 + k * ds
+                    x = cx + radius * math.sin(phi)
+                    y = cy - radius * math.cos(phi)
+                    positions.append((x, y, phi))
+        else:
+            raise NotImplementedError(f"Unsupported geometry type: {self.shape}")
+        return np.array(positions)
 
 @dataclass
 class PlanView:
@@ -428,6 +480,27 @@ class PlanView:
         geoms = [Geometry.fromXML(ge) for ge in element.findall("geometry")]
         return cls(geometries=geoms)
 
+    def sampleReferenceLine(self, resolution):
+        """Sample the planView's reference line along all geometries.
+
+        Args:
+            resolution: maximum distance between samples along the road (metres).
+
+        Returns:
+            A list of tuples (s, x, y, phi) where s is the global distance along
+            the road reference line, x and y are world coordinates and phi is
+            the orientation (heading).
+        """
+        samples = []
+        for geom in self.geometries:
+            geom_length = geom.length
+            # Determine number of segments for this geometry
+            n = max(int(math.ceil(geom_length / resolution)) + 1, 2)
+            positions = geom.samplePositions(n)
+            for i, (x, y, phi) in enumerate(positions):
+                s = geom.s + (geom_length * i / (n - 1))
+                samples.append((s, x, y, phi))
+        return np.array(samples)
 
 @dataclass
 class Elevation:
