@@ -69,7 +69,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
 
     def node(self, n):
         n_id = str(n.id)
-        coordinates = [n.location.lon, n.location.lat, 0.0] # No elevation for now
+        coordinates = [n.location.lon, n.location.lat, float(n.tags["ele"]) if "ele" in n.tags else 0.0]
         meters_coordinates = self.projectToMeters(coordinates)
         self.nodes[n_id] = {
             "nid": n_id,
@@ -135,7 +135,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             self.ways[w_id] = way
 
     def readOSM(self):
-        self.apply_file(self.dataset.getOSMPath())
+        self.apply_file(self.dataset.getCorrectedOSMPath())
         self.annotateNodesWithWays()
         self.detectConnectedWays()
         self.detectJunctions()
@@ -283,7 +283,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             successor = opendrive.PredecessorSuccessor(elementType=successor_type, elementId=element_id, tag="successor")
         return opendrive.Link(predecessor=predecessor, successor=successor)
     
-    def getElevationsAtPoints(self, positions):
+    def getDEMElevationsAtPoints(self, positions):
         elevations = []
         for position in positions:
             elevations.append(self.dataset.minHeightAtXYMeters(self.dem_data, (position[1] + self.bounds_meters[0], position[2] + self.bounds_meters[1])))
@@ -294,17 +294,29 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         L = positions[-1][0]
         sn = (positions[:, 0] / L)
 
-        def model(sn, a, b, c, d):
+        def model(sn, a, b):
             s = s0 + L*sn
-            return a + b*s + c*(s**2) + d*(s**3)
+            return a + b*s
         coeff, _ = curve_fit(model, sn, elevations)
         print(coeff)
-        return opendrive.Elevation(s=s0, a=coeff[0], b=coeff[1], c=coeff[2], d=coeff[3])
+        return opendrive.Elevation(s=s0, a=coeff[0], b=coeff[1], c=0.0, d=0.0)
     
-    def generateElevationProfileFromOSMWayData(self, way_data, plan_view):
+    def generateElevationProfileFromOSMWayData(self, way_data, plan_view, road_length):
         elevations = []
         positions = plan_view.sampleReferenceLine(self.resolution)
-        elevations_reference_line = self.getElevationsAtPoints(positions)
+        elevations_reference_line = None
+        # For bridges we linearly interpolate between the elevations given from the start to the end
+        # We assume bridges do not dip, or curve up significantly between nodes.
+        if way_data["bridge"]:
+            beginning_node = self.nodes[way_data["nodes"][0]]
+            ending_node = self.nodes[way_data["nodes"][-1]]
+            beginning_node_coordinates = beginning_node["meters_coordinates"]
+            ending_node_coordinates = ending_node["meters_coordinates"]
+            hdg = _giveHeading(beginning_node_coordinates[0], beginning_node_coordinates[1], ending_node_coordinates[0], ending_node_coordinates[1])
+            positions = np.array([[0.0, beginning_node_coordinates[0], beginning_node_coordinates[1], hdg], [road_length, ending_node_coordinates[0], ending_node_coordinates[1], hdg]])
+            elevations_reference_line = np.array([beginning_node_coordinates[2], ending_node_coordinates[2]])
+        else:
+            elevations_reference_line = self.getDEMElevationsAtPoints(positions)
         elevations.append(self.regressElevationEquationFromReferenceLine(positions, elevations_reference_line))
         return opendrive.ElevationProfile(elevations=elevations)
 
@@ -312,7 +324,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         way_data = self.ways[wid]
         id = self.ways[wid]["opendrive_id"]
         plan_view, road_length = self.generatePlanViewFromOSMWayData(way_data)
-        elevation_profile = self.generateElevationProfileFromOSMWayData(way_data, plan_view)
+        elevation_profile = self.generateElevationProfileFromOSMWayData(way_data, plan_view, road_length)
         lanes = self.generateLanesFromOSMWayData(way_data)
         linkage = self.generateRoadLinkageFromOSMWayData(way_data)
         return opendrive.Road(id=id, length=road_length, planView=plan_view, elevationProfile=elevation_profile, lanes=lanes, link=linkage)
