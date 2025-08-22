@@ -493,8 +493,8 @@ class Geometry:
                 rely = y - self.y
                 proj = relx * dx + rely * dy
                 proj_clamped = max(0.0, min(self.length, proj))
-                cx = x0 + dx * proj_clamped
-                cy = y0 + dy * proj_clamped
+                cx = self.x + dx * proj_clamped
+                cy = self.y + dy * proj_clamped
                 dist = math.hypot(x - cx, y - cy)
                 s_local = proj_clamped
             else:
@@ -568,6 +568,16 @@ class PlanView:
                 s = geom.s + (geom_length * i / (n - 1))
                 samples.append((s, x, y, phi))
         return np.array(samples)
+
+    def projectXYToS(self, x, y):
+        best_dist = float("inf")
+        best_s = None
+        for geom in self.geometries:
+            current_s, dist = geom.projectXYToS(x, y)
+            if dist < best_dist:
+                best_dist = dist
+                best_s = current_s
+        return best_s, best_dist
 
 @dataclass
 class Elevation:
