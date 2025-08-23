@@ -50,7 +50,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
     junctions = {}
     opendrive_id_count = 0
 
-    def __init__(self, dataset, reference_line_resolution=0.1, elevation_line_max_length=500.0):
+    def __init__(self, dataset, reference_line_resolution=0.1, elevation_line_max_length=25.0):
         self.dataset = dataset
         self.bounds_meters = self.dataset.getBoundsInMeters()
         self.bounds_coords = self.dataset.getBoundsInCoords()
