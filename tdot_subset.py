@@ -256,7 +256,7 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
                 self.node_graph.add_edge(node1, node2)
             self.ways[w_id] = self.ways_original[w_id].copy()
     
-    def generateImplicitWays(self, node_count=8, distance_bound=200, cores=48):
+    def generateImplicitWays(self, node_count=15, distance_bound=200, cores=48):
         all_segments = []
 
         def findPathsFromSource(node_graph, source, node_count):
@@ -555,11 +555,11 @@ class TDOTSubset:
 
     def loadDEMsFromBoundingBoxCoords(self, bbox):
         bbox_meters = self.convertToMeters(bbox)
-        return loadDEMsFromBoundingBoxMeters(bbox_meters)
+        return self.loadDEMsFromBoundingBoxMeters(bbox_meters)
 
     def loadLAZsFromBoundingBoxCoords(self, bbox):
         bbox_meters = self.convertToMeters(bbox)
-        return loadLAZsFromBoundingBoxMeters(bbox_meters)
+        return self.loadLAZsFromBoundingBoxMeters(bbox_meters)
 
     def getTilesFromBoundingBoxCoords(self, bbox):
         bbox_meters = self.convertToMeters(bbox)

@@ -230,7 +230,7 @@ def processLidarCorrection(child_seed, tdot_subset, wid, way_coordinates, way_bo
 
     osm_process_points = open3d.geometry.PointCloud()
     osm_process_points.points = open3d.utility.Vector3dVector(smoothed)
-    thresholds = [0.21]
+    thresholds = [0.35]
     fitness_desire = 0.99
     transforms, fitnesses, mse = [], [], []
     #print(wid, " ready!")
