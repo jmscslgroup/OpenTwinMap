@@ -413,6 +413,34 @@ class Geometry:
             shape=shape,
         )
     
+    def samplePosition(self, ds):
+        if isinstance(self.shape, Line):
+            x = self.x + (ds * math.cos(self.hdg))
+            y = self.y + (ds * math.sin(self.hdg))
+            return np.array([x, y, self.hdg])
+        elif isinstance(self.shape, Arc):
+            k = self.shape.curvature
+            if abs(k) < 1e-8:
+                x = self.x + (ds * math.cos(self.hdg))
+                y = self.y + (ds * math.sin(self.hdg))
+                return np.array([x, y, self.hdg])
+            else:
+                radius = 1.0 / k
+                phi = self.hdg + (k * ds)
+                cx = self.x - radius * math.sin(self.hdg)
+                cy = self.y + radius * math.cos(self.hdg)
+                x = cx + radius * math.sin(phi)
+                y = cy - radius * math.cos(phi)
+                return np.array([x, y, phi])
+        else:
+            raise NotImplementedError(f"Unsupported geometry type: {self.shape}")
+    
+    def startPosition(self):
+        return self.samplePosition(0.0)
+    
+    def endPosition(self):
+        return self.samplePosition(self.length)
+    
     def samplePositions(self, num_samples):
         """Sample (x, y, phi) positions along this geometry.
 
@@ -427,41 +455,9 @@ class Geometry:
         if num_samples < 2:
             raise ValueError("num_samples must be >= 2")
         positions = []
-        if isinstance(self.shape, Line):
-            # Straight line: phi is constant
-            for i in range(num_samples):
-                ds = (self.length) * i / (num_samples - 1)
-                x = self.x + ds * math.cos(self.hdg)
-                y = self.y + ds * math.sin(self.hdg)
-                phi = self.hdg
-                positions.append((x, y, phi))
-        elif isinstance(self.shape, Arc):
-            # Circular arc: curvature k defines radius = 1/k
-            k = self.shape.curvature
-            # avoid division by zero; treat near zero curvature as straight line
-            if abs(k) < 1e-8:
-                for i in range(num_samples):
-                    ds = (self.length) * i / (num_samples - 1)
-                    x = self.x + ds * math.cos(self.hdg)
-                    y = self.y + ds * math.sin(self.hdg)
-                    phi = self.hdg
-                    positions.append((x, y, phi))
-            else:
-                radius = 1.0 / k
-                # Starting orientation
-                phi0 = self.hdg
-                # Centre of the circle
-                cx = self.x - radius * math.sin(phi0)
-                cy = self.y + radius * math.cos(phi0)
-                for i in range(num_samples):
-                    ds = (self.geom_length) * i / (num_samples - 1)
-                    # angle change along the arc
-                    phi = phi0 + k * ds
-                    x = cx + radius * math.sin(phi)
-                    y = cy - radius * math.cos(phi)
-                    positions.append((x, y, phi))
-        else:
-            raise NotImplementedError(f"Unsupported geometry type: {self.shape}")
+        for i in range(num_samples):
+            ds = (self.length) * i / (num_samples - 1)
+            positions.append(self.samplePosition(ds))
         return np.array(positions)
 
     def projectXYToS(self, x, y):

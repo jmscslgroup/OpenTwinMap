@@ -36,6 +36,18 @@ def _getPositiveHeading(hdg):
          hdg+=2.0*np.pi
     return hdg%(np.pi*2.0)
 
+def _curvature(p0, p1, p2):
+    """Signed curvature through three points."""
+    (x0,y0), (x1,y1), (x2,y2) = p0, p1, p2
+    a = math.hypot(x1-x0, y1-y0)
+    b = math.hypot(x2-x1, y2-y1)
+    c = math.hypot(x2-x0, y2-y0)
+    # twice signed area
+    area2 = (x1-x0)*(y2-y0) - (y1-y0)*(x2-x0)
+    if a*b*c < 1e-12:
+        return 0.0
+    return (2*area2)/(a*b*c)
+
 class OSMToOpenDrive(osmium.SimpleHandler):
     feet_to_meters = 0.3048
     origin = None
@@ -389,8 +401,10 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             position_s = position[0]
             current_elevation = elevations_reference_line[i]
             for (bounds_min, bounds_max, elevation_min, elevation_max) in positions_bridges:
-                if (bounds_min <= position_s) and (position_s <= bounds_max):
-                    bounds_length = bounds_max - bounds_min
+                bounds_length = bounds_max - bounds_min 
+                if (bounds_min <= position_s) and (position_s <= bounds_max) and (bounds_length > 0):
+                    print(bounds_min, bounds_max, elevation_min, elevation_max)
+                    print(position_s, bounds_min, bounds_length)
                     elevation_max_weight = ((position_s - bounds_min) / bounds_length)
                     elevation_min_weight = 1.0 - elevation_max_weight
                     current_elevation = (elevation_min * elevation_min_weight) + (elevation_max * elevation_max_weight)
@@ -419,10 +433,53 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         elevations = self.generateElevationSequencesFromReferenceline(positions, elevations_reference_line)
         return opendrive.ElevationProfile(elevations=elevations)
 
+    def convertLinePlanViewToArcs(self, plan_view, min_arc_points=5, k_tol=0.01):
+        geometries = []
+        s_arc = 0.0
+        i = 0
+        old_geometries = plan_view.geometries
+        while i < len(old_geometries):
+            j = i
+            k_values = []
+            # collect curvature over triples until it diverges
+            while j + 1 < len(old_geometries):
+                point_1 = old_geometries[j].startPosition()[:2]
+                point_2 = old_geometries[j + 1].startPosition()[:2]
+                point_3 = old_geometries[j + 1].endPosition()[:2]
+                k = _curvature(point_1, point_2, point_3)
+                if k_values and abs(k - k_values[-1]) > k_tol:
+                    break
+                k_values.append(k)
+                j += 1
+            # if we have enough points and curvature magnitude not zero, fit an arc
+            if len(k_values) >= (min_arc_points-2) and abs(sum(k_values)/len(k_values)) > 0:
+                # group points from i to j+1 inclusive
+                group = old_geometries[i:j+1]
+                # arc length along polyline
+                L = sum(group[idx].length for idx in range(len(group)))
+                # determine heading at start (direction of first chord)
+                hdg = group[0].hdg
+                # curvature sign is mean of k_values
+                k_mean = sum(k_values)/len(k_values)
+                geometries.append(opendrive.Geometry(s=s_arc, x=group[0].x, y=group[0].y,
+                                    hdg=hdg, length=L, shape=opendrive.Arc(curvature=k_mean)))
+                s_arc += L
+                i = j+1  # advance past arc group
+            else:
+                # otherwise emit a line between consecutive points
+                line_geometry = old_geometries[i]
+                line_geometry.s = s_arc
+                geometries.append(line_geometry)
+                s_arc += line_geometry.length
+                i += 1
+
+        return opendrive.PlanView(geometries=geometries), s_arc
+
     def generateRoadFromOSMWay(self, wid):
         way_data = self.ways[wid]
         id = self.ways[wid]["opendrive_id"]
         plan_view, road_length = self.generatePlanViewFromOSMWayData(way_data)
+        plan_view, road_length = self.convertLinePlanViewToArcs(plan_view)
         elevation_profile = self.generateElevationProfileFromOSMWayData(way_data, plan_view, road_length)
         lanes = self.generateLanesFromOSMWayData(way_data)
         linkage = self.generateRoadLinkageFromOSMWayData(way_data)
