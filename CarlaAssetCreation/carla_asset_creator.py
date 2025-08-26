@@ -8,7 +8,7 @@ import subprocess
 import shapely.geometry
 import concurrent.futures
 from .carla_asset_dataset import CarlaAssetDataset
-from .opendrive_parser import OpenDriveParser
+from ..OpenDrive.opendrive import OpenDRIVE
 
 def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_data, bounding_box, tile_point_interval, original_bounds):
     import trimesh
@@ -139,7 +139,7 @@ def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, o
         A trimesh.Trimesh object containing the vertices, faces and UVs.
     """
     # Sample along reference line
-    ref_samples = road.sampleReferenceLine(max_step=max_step)
+    ref_samples = road.planView.sampleReferenceLine(max_step=max_step)
     num = len(ref_samples)
     vertices = []
     faces = []
@@ -212,8 +212,6 @@ def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, o
             [u_coord, 1.0],  # right bottom
         ])
 
-    # Build faces
-    # For each segment between consecutive samples we generate faces
     for i in range(num - 1):
         # base index for sample i
         idx0 = i * 4
@@ -222,27 +220,27 @@ def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, o
         lt0, rt0, lb0, rb0 = idx0, idx0 + 1, idx0 + 2, idx0 + 3
         lt1, rt1, lb1, rb1 = idx1, idx1 + 1, idx1 + 2, idx1 + 3
         # Top surface (two triangles)
-        faces.append([lt0, lt1, rt1])
-        faces.append([lt0, rt1, rt0])
+        faces.append([lt0, rt1, lt1])
+        faces.append([lt0, rt0, rt1])
         # Bottom surface (note: reverse winding for correct normals)
-        faces.append([lb0, rb0, rb1])
-        faces.append([lb0, rb1, lb1])
+        faces.append([lb0, rb1, rb0])
+        faces.append([lb0, lb1, rb1])
         # Left side
-        faces.append([lb0, lb1, lt1])
-        faces.append([lb0, lt1, lt0])
+        faces.append([lb0, lt1, lb1])
+        faces.append([lb0, lt0, lt1])
         # Right side
-        faces.append([rt0, rt1, rb1])
-        faces.append([rt0, rb1, rb0])
+        faces.append([rt0, rb1, rt1])
+        faces.append([rt0, rb0, rb1])
     # Caps (start and end)
     # Start cap: first sample index 0-3
     lt0, rt0, lb0, rb0 = 0, 1, 2, 3
     # Two triangles
-    faces.append([lt0, rt0, rb0])
+    faces.append([lt0, rb0, rt0])
     faces.append([lt0, rb0, lb0])
     # End cap: last sample indices
     lt1, rt1, lb1, rb1 = (num - 1) * 4, (num - 1) * 4 + 1, (num - 1) * 4 + 2, (num - 1) * 4 + 3
-    faces.append([lt1, lb1, rb1])
-    faces.append([lt1, rb1, rt1])
+    faces.append([lt1, rb1, lb1])
+    faces.append([lt1, rt1, rb1])
 
     vertices_np = np.array(vertices)
     faces_np = np.array(faces)
@@ -350,8 +348,7 @@ class CarlaAssetCreator:
         self.metadata["roads"] = {}
         self.metadata["merged_roads"] = {}
         self.copyXODR()
-        self.opendrive_data = OpenDriveParser(self.cooked_dataset.getFullPath(self.cooked_dataset.xodr_path))
-        self.opendrive_data.parseOpenDriveFile()
+        self.opendrive_data = OpenDRIVE.loadFile(self.cooked_dataset.getFullPath(self.cooked_dataset.xodr_path))
 
     def copyXODR(self):
         shutil.copy(self.map_data.getXODRPath(), self.cooked_dataset.getFullPath(self.cooked_dataset.xodr_path))

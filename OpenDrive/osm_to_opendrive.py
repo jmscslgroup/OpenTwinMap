@@ -451,10 +451,11 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                     break
                 k_values.append(k)
                 j += 1
+            j = i + len(k_values)
             # if we have enough points and curvature magnitude not zero, fit an arc
             if len(k_values) >= (min_arc_points-2) and abs(sum(k_values)/len(k_values)) > 0:
                 # group points from i to j+1 inclusive
-                group = old_geometries[i:j+1]
+                group = old_geometries[i:j + 1]
                 # arc length along polyline
                 L = sum(group[idx].length for idx in range(len(group)))
                 # determine heading at start (direction of first chord)
@@ -464,7 +465,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                 geometries.append(opendrive.Geometry(s=s_arc, x=group[0].x, y=group[0].y,
                                     hdg=hdg, length=L, shape=opendrive.Arc(curvature=k_mean)))
                 s_arc += L
-                i = j+1  # advance past arc group
+                i = j + 1  # advance past arc group
             else:
                 # otherwise emit a line between consecutive points
                 line_geometry = old_geometries[i]
@@ -479,7 +480,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         way_data = self.ways[wid]
         id = self.ways[wid]["opendrive_id"]
         plan_view, road_length = self.generatePlanViewFromOSMWayData(way_data)
-        plan_view, road_length = self.convertLinePlanViewToArcs(plan_view)
+        #plan_view, road_length = self.convertLinePlanViewToArcs(plan_view)
         elevation_profile = self.generateElevationProfileFromOSMWayData(way_data, plan_view, road_length)
         lanes = self.generateLanesFromOSMWayData(way_data)
         linkage = self.generateRoadLinkageFromOSMWayData(way_data)
