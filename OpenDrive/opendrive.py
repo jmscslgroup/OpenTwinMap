@@ -38,7 +38,7 @@ def _indent(elem, level=0, indent_size="\t"):
             elem.text = i + indent_size  # child block starts on next line
 
         for child in elem:
-            indent(child, level + 1, indent_size)
+            _indent(child, level + 1, indent_size)
             # Each child (except possibly the last) ends with a newline + one extra indent
             if not (child.tail and child.tail.strip()):
                 child.tail = i + indent_size
@@ -551,7 +551,7 @@ class Geometry:
         s = s - self.s
         if isinstance(self.shape, Line):
             # 90 degrees pointing the left side of the geometry in relation to its heading
-            hdg_orthogonal = self.hdg - (math.pi/2)
+            hdg_orthogonal = self.hdg + (math.pi/2)
             dx_ds = math.cos(self.hdg)
             dy_ds = math.sin(self.hdg)
             dx_dt = math.cos(hdg_orthogonal)
@@ -559,8 +559,9 @@ class Geometry:
             original_x = self.x + (dx_dt * t)
             original_y = self.y + (dy_dt * t)
             return (original_x + (dx_ds * s), original_y + (dy_ds * s))
-
-
+        else:
+            raise NotImplementedError(f"Unsupported geometry type: {self.shape}")
+            
 @dataclass
 class PlanView:
     """Container for a sequence of geometry segments."""
@@ -610,9 +611,11 @@ class PlanView:
         return best_s, best_dist
     
     def getGeometryAtS(self, s):
+        current_geom = None
         for geom in self.geometries:
-            if geom.s >= s:
-                return geom
+            if geom.s <= s:
+                current_geom = geom
+        return current_geom
     
     def projectSAndTToXY(self, s, t=0.0):
         geom = self.getGeometryAtS(s)
@@ -669,10 +672,11 @@ class ElevationProfile:
         )
     
     def getElevationObjectAtS(self, s):
+        current_elevation = None
         for elevation in self.elevations:
-            if elevation.s >= s:
-                return elevation
-        return None
+            if elevation.s <= s:
+                current_elevation = elevation
+        return current_elevation
     
     def computeElevationAtS(self, s):
         elevation = self.getElevationObjectAtS(s)
@@ -1187,9 +1191,11 @@ class Lane:
         )
     
     def getWidthEntryAtOffset(self, offset: float) -> Width:
-        for current_width in self.widths:
-            if current_width.sOffset >= offset:
-                return current_width
+        current_width = None
+        for width in self.widths:
+            if width.sOffset <= offset:
+                current_width = width
+        return current_width
     
     def calculateWidthAtOffset(self, offset: float):
         width_entry = self.getWidthEntryAtOffset(offset)
@@ -1818,19 +1824,17 @@ class Road:
     
     # No superelevation or crossfall for now
     def computeElevationAtSAndT(self, s: float, t: float):
-        return self.elevationProfile.
+        return self.elevationProfile.computeElevationAtS(s)
     
     def laneSectionAndOffsetAt(self, s):
         section = None
         offset = None
         for current_section in self.lanes.laneSections:
-            if current_section.s >= s:
+            if current_section.s <= s:
                 section = current_section
-                break
         for current_offset in self.lanes.laneOffsets:
-            if current_offset.s >= s:
+            if current_offset.s <= s:
                 offset = current_offset
-                break
         return section, offset
     
     def sampleReferenceLine(self, resolution):
@@ -1865,34 +1869,41 @@ class Road:
     
     def getLaneBoundFromReferenceLine(self, s: float, lane: Lane, section: LaneSection, lane_offset: LaneOffset):
         offset_at_s = lane_offset.calculateOffsetAtOffset(s)
-        lw = offset_at_s
+        lt = offset_at_s
         if lane.id > 0:
             lanes_to_parse = self.getLanesLeftOfLane(lane, section)
             for current_lane_id in lanes_to_parse:
                 current_lane = lanes_to_parse[current_lane_id]
                 current_lane_width_offset = current_lane.calculateWidthAtOffset(s - section.s)
-                lw -= current_lane_width_offset
+                lt -= current_lane_width_offset
         else:
             lanes_to_parse = self.getLanesRightOfLane(lane, section)
             for current_lane_id in lanes_to_parse:
                 current_lane = lanes_to_parse[current_lane_id]
                 current_lane_width_offset = current_lane.calculateWidthAtOffset(s - section.s)
-                lw += current_lane_width_offset
+                lt += current_lane_width_offset
                 
-        rw = lw - lane.calculateWidthAtOffset(s - section.s)
-        return lw, rw
+        rt = lt - lane.calculateWidthAtOffset(s - section.s)
+        return lt, rt
     
     def computeLaneVertices(self, s: float, thickness: float, lane: Lane, section: LaneSection, lane_offset: LaneOffset):
-        lw, rw = self.getLaneBoundFromReferenceLine(s, lane, section, lane_offset)
+        lt, rt = self.getLaneBoundFromReferenceLine(s, lane, section, lane_offset)
+        elevation = self.elevationProfile.computeElevationAtS(s)
+        lx, ly = self.planView.projectSAndTToXY(s, lt)
+        rx, ry = self.planView.projectSAndTToXY(s, rt)
+        top_left = [lx, ly, elevation + (thickness / 2.0)]
+        top_right = [rx, ry, elevation + (thickness / 2.0)]
+        bottom_left = [lx, ly, elevation - (thickness / 2.0)]
+        bottom_right = [rx, ry, elevation - (thickness / 2.0)]
+        return [top_left, top_right, bottom_left, bottom_right]
         
-    
     def computeLanesVertices(self, s: float, thickness: float, lane_section: LaneSection, lane_offset: LaneOffset):
-        left_lanes, center_lane, right_lanes = lane_section.left.lanes, lane_section.center, lane_section.right
+        left_lanes, center_lane, right_lanes = lane_section.left.lanes if lane_section.left is not None else [], lane_section.center.lanes, lane_section.right.lanes if lane_section.right is not None else []
         lanes_vertices = {}
         for lane in left_lanes:
-            lanes_vertices[lane.id] = self.computeLaneVertices(s, thickness, lane_section.s, lane, lane_offset)
+            lanes_vertices[lane.id] = self.computeLaneVertices(s, thickness, lane, lane_section, lane_offset)
         for lane in right_lanes:
-            lanes_vertices[lane.id] = self.computeLaneVertices(s, thickness, lane_section.s, lane, lane_offset)
+            lanes_vertices[lane.id] = self.computeLaneVertices(s, thickness, lane, lane_section, lane_offset)
         return lanes_vertices
     
     # Fetches the bounding vertices for each lane and currently just returns the outermost lane and the innermost lane's boundaries
@@ -1949,9 +1960,11 @@ class OpenDRIVE:
     @classmethod
     def loadFile(cls: Type[T], file_path: str) -> T:
         xml_data = ET.parse(file_path)
-        return cls.fromXML(xml_data)
+        root_xml = xml_data.getroot()
+        return cls.fromXML(root_xml)
     
     def writeFile(self, file_path: str):
         data = self.toXML()
         _indent(data)
-        data.write(file_path, encoding="utf-8", xml_declaration=True)
+        root = ET.ElementTree(data)
+        root.write(file_path, encoding="utf-8", xml_declaration=True)
