@@ -1871,17 +1871,17 @@ class Road:
         offset_at_s = lane_offset.calculateOffsetAtOffset(s)
         lt = offset_at_s
         if lane.id > 0:
-            lanes_to_parse = self.getLanesLeftOfLane(lane, section)
-            for current_lane_id in lanes_to_parse:
-                current_lane = lanes_to_parse[current_lane_id]
-                current_lane_width_offset = current_lane.calculateWidthAtOffset(s - section.s)
-                lt -= current_lane_width_offset
-        else:
             lanes_to_parse = self.getLanesRightOfLane(lane, section)
             for current_lane_id in lanes_to_parse:
                 current_lane = lanes_to_parse[current_lane_id]
                 current_lane_width_offset = current_lane.calculateWidthAtOffset(s - section.s)
                 lt += current_lane_width_offset
+        else:
+            lanes_to_parse = self.getLanesLeftOfLane(lane, section)
+            for current_lane_id in lanes_to_parse:
+                current_lane = lanes_to_parse[current_lane_id]
+                current_lane_width_offset = current_lane.calculateWidthAtOffset(s - section.s)
+                lt -= current_lane_width_offset
                 
         rt = lt - lane.calculateWidthAtOffset(s - section.s)
         return lt, rt
@@ -1907,13 +1907,19 @@ class Road:
         return lanes_vertices
     
     # Fetches the bounding vertices for each lane and currently just returns the outermost lane and the innermost lane's boundaries
-    def generateRoadVerticesAtS(self, s: float, thickness: float = 1.0):
+    def generateRoadVerticesAtS(self, s: float, thickness: float = 1.0, opendrive_origin: list[float] = None):
         lane_section, lane_offset = self.laneSectionAndOffsetAt(s)
         lane_vertices = self.computeLanesVertices(s, thickness, lane_section, lane_offset)
         lane_vertices_keys = list(lane_vertices.keys())
         lane_vertices_keys.sort(reverse=True)
         left_most_lane_vertices, right_most_lane_vertices = lane_vertices[lane_vertices_keys[0]], lane_vertices[lane_vertices_keys[-1]]
-        return [left_most_lane_vertices[0], right_most_lane_vertices[1], left_most_lane_vertices[2], right_most_lane_vertices[3]]        
+        vertices = [left_most_lane_vertices[0], right_most_lane_vertices[1], left_most_lane_vertices[2], right_most_lane_vertices[3]]
+        if opendrive_origin is not None:
+            for i in range(len(vertices)):
+                vertices[i][0] -= opendrive_origin[0]
+                vertices[i][1] -= opendrive_origin[1]
+                vertices[i][2] -= opendrive_origin[2]
+        return vertices
 
 @dataclass
 class OpenDRIVE:

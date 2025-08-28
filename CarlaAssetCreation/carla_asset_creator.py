@@ -156,7 +156,8 @@ def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, o
         # Normalised coordinate along length
         u_coord = s / road.length if road.length > 0 else 0.0
         # Add vertices: order matters for indexing later
-        vertices.extend(road.generateRoadVerticesAtS(s))
+        opendrive_origin = [0, 0, original_bounds[2]]
+        vertices.extend(road.generateRoadVerticesAtS(s, thickness, opendrive_origin))
         # UVs for these four vertices
         # Top surface: v=0 at left, v=1 at right
         uvs.extend([
