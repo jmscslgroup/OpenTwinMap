@@ -362,6 +362,10 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             current_position_split.append(position)
             current_elevation_split.append(elevation)
         if len(current_position_split) > 0:
+            if len(position_elevation_splits) > 0:
+                current_position_split = position_elevation_splits[-1][0].tolist() + current_position_split
+                current_elevation_split = position_elevation_splits[-1][1].tolist() + current_elevation_split
+                position_elevation_splits = position_elevation_splits[:-1]
             current_position_split = np.array(current_position_split)
             current_elevation_split = np.array(current_elevation_split)
             position_elevation_splits.append([current_position_split, current_elevation_split])

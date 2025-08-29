@@ -447,7 +447,6 @@ class CarlaAssetCreator:
             for carla_root, group, name, full_mesh_path, mesh_path in jobs:
                 mesh_metadata = _generateMergedRoadMethod(carla_root, group, name, full_mesh_path, mesh_path)
                 self.metadata["merged_roads"][mesh_metadata["name"]] = mesh_metadata
-                print(group, name, new_path)
         else:
             with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
                 futures = [executor.submit(_generateMergedRoadMethod, carla_root, group, name, full_mesh_path, mesh_path) for carla_root, group, name, full_mesh_path, mesh_path in jobs]
