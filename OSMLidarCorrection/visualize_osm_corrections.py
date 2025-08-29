@@ -1,4 +1,4 @@
-modules_path = "/home/richarwa/CarlaIngestion"
+modules_path = "/home/richarwa/SecondSSD/CarlaIngestion"
 import sys
 sys.path.append(modules_path)
 import open3d

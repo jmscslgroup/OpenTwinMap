@@ -1876,6 +1876,7 @@ class Road:
                 current_lane = lanes_to_parse[current_lane_id]
                 current_lane_width_offset = current_lane.calculateWidthAtOffset(s - section.s)
                 lt += current_lane_width_offset
+            lt += lane.calculateWidthAtOffset(s - section.s)
         else:
             lanes_to_parse = self.getLanesLeftOfLane(lane, section)
             for current_lane_id in lanes_to_parse:
