@@ -773,12 +773,12 @@ if __name__ == "__main__":
     subset_path = "./compile_subset.json"
     subset_folder = "SubsetSelection"
 
-    #os.makedirs(subset_folder, exist_ok=True)
-    #print("Compiling metadata")
-    #TDOTSubset.compileMetadata(metadata_path, subset_path, subset_folder)
+    os.makedirs(subset_folder, exist_ok=True)
+    print("Compiling metadata")
+    TDOTSubset.compileMetadata(metadata_path, subset_path, subset_folder)
     print("Compiling OSM")
     TDOTSubset.compileOSMSubset(metadata_path, subset_path, subset_folder)
-    #print("Compiling DEM")
-    #TDOTSubset.compileDEMSubset(metadata_path, subset_path, subset_folder)
-    #print("Compiling LIDAR")
-    #TDOTSubset.compileLidarSubset(metadata_path, subset_path, subset_folder)
+    print("Compiling DEM")
+    TDOTSubset.compileDEMSubset(metadata_path, subset_path, subset_folder)
+    print("Compiling LIDAR")
+    TDOTSubset.compileLidarSubset(metadata_path, subset_path, subset_folder)
