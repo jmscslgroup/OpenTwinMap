@@ -511,8 +511,14 @@ class TDOTSubset:
         dems = [self.loadDEM(tile) for tile in tiles]
         return DEM.from_dems(dems, 2.0, -999999)
 
-    def loadLAZs(self, tiles, process=False):
+    def loadLAZs(self, tiles, process=False, voxel_size=None, every_k_points=None):
         pcds = [self.loadLAZ(tile, process) for tile in tiles]
+        if voxel_size is not None:
+            for i in range(len(pcds)):
+                pcds[i] = pcds[i].voxel_down_sample(voxel_size=voxel_size)
+        elif every_k_points is not None:
+            for i in range(len(pcds)):
+                pcds[i] = pcds[i].uniform_down_sample(every_k_points=every_k_points)
         return pcds
 
     def convertToMeters(self, coord):
