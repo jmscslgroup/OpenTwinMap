@@ -774,7 +774,10 @@ class Shape:
             c=_get_attrib(element, "c", float, 0.0),
             d=_get_attrib(element, "d", float, 0.0),
         )
-
+    
+    def computeHShape(self, dt: float):
+        dt = dt - self.t
+        return self.a + (self.b * dt) + (self.c * (dt ** 2)) + (self.d * (dt ** 3))
 
 @dataclass
 class LateralProfile:
@@ -800,6 +803,18 @@ class LateralProfile:
             crossfalls=[Crossfall.fromXML(e) for e in element.findall("crossfall")],
             shapes=[Shape.fromXML(e) for e in element.findall("shape")],
         )
+    
+    def getShapeAtS(self, s: float):
+        shapes = self.shapes
+        for shape in shapes:
+            if shape.s >= s:
+                return shape
+    
+    # Currently we assume we're using shapes and that there is one shape per portion of the reference line. 
+    # It's a kludge. We'll make it better ;)
+    def computeElevationDeltaAtSAndT(self, s: float, t: float):
+        shape = self.getShapeAtS(s)
+        return shape.computeHShape(t)
 
 
 @dataclass
@@ -1822,6 +1837,9 @@ class Road:
             objects=objects,
         )
     
+    def projectSAndTToXY(self, s: float, t: float = 0.0):
+        return self.planView.projectSAndTToXY(s, t)
+    
     # No superelevation or crossfall for now
     def computeElevationAtSAndT(self, s: float, t: float):
         return self.elevationProfile.computeElevationAtS(s)
@@ -1887,6 +1905,18 @@ class Road:
         rt = lt - lane.calculateWidthAtOffset(s - section.s)
         return lt, rt
     
+    def generateTBoundsAtS(self, s: float):
+        total_lanes, lane_section, lane_offset = self.getLanes(s)
+        max_t = float('-inf')
+        min_t = float('inf')
+        for lane in total_lanes:
+            lt, rt = self.getLaneBoundFromReferenceLine(s, lane, lane_section, lane_offset)
+            if lt > max_t:
+                max_t = lt
+            if rt < min_t:
+                min_t = rt
+        return max_t, min_t
+    
     def computeLaneVertices(self, s: float, thickness: float, lane: Lane, section: LaneSection, lane_offset: LaneOffset):
         lt, rt = self.getLaneBoundFromReferenceLine(s, lane, section, lane_offset)
         elevation = self.elevationProfile.computeElevationAtS(s)
@@ -1897,20 +1927,27 @@ class Road:
         bottom_left = [lx, ly, elevation - (thickness / 2.0)]
         bottom_right = [rx, ry, elevation - (thickness / 2.0)]
         return [top_left, top_right, bottom_left, bottom_right]
-        
-    def computeLanesVertices(self, s: float, thickness: float, lane_section: LaneSection, lane_offset: LaneOffset):
+    
+    def getLanes(self, s: float):
+        lane_section, lane_offset = self.laneSectionAndOffsetAt(s)
         left_lanes, center_lane, right_lanes = lane_section.left.lanes if lane_section.left is not None else [], lane_section.center.lanes, lane_section.right.lanes if lane_section.right is not None else []
-        lanes_vertices = {}
+        total_lanes = []
         for lane in left_lanes:
-            lanes_vertices[lane.id] = self.computeLaneVertices(s, thickness, lane, lane_section, lane_offset)
+            total_lanes.append(lane)
         for lane in right_lanes:
+            total_lanes.append(lane)
+        return total_lanes, lane_section, lane_offset
+        
+    def computeLanesVertices(self, s: float, thickness: float):
+        total_lanes, lane_section, lane_offset = self.getLanes(s)
+        lanes_vertices = {}
+        for lane in total_lanes:
             lanes_vertices[lane.id] = self.computeLaneVertices(s, thickness, lane, lane_section, lane_offset)
         return lanes_vertices
     
     # Fetches the bounding vertices for each lane and currently just returns the outermost lane and the innermost lane's boundaries
     def generateRoadVerticesAtS(self, s: float, thickness: float = 1.0, opendrive_origin: list[float] = None):
-        lane_section, lane_offset = self.laneSectionAndOffsetAt(s)
-        lane_vertices = self.computeLanesVertices(s, thickness, lane_section, lane_offset)
+        lane_vertices = self.computeLanesVertices(s, thickness)
         lane_vertices_keys = list(lane_vertices.keys())
         lane_vertices_keys.sort(reverse=True)
         left_most_lane_vertices, right_most_lane_vertices = lane_vertices[lane_vertices_keys[0]], lane_vertices[lane_vertices_keys[-1]]

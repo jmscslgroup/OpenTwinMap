@@ -3,6 +3,8 @@ import pyproj
 import numpy as np
 import math
 from scipy.optimize import curve_fit
+import subprocess
+import concurrent.futures
 from . import opendrive
 
 def _generatePairs(items):
@@ -55,6 +57,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
     bounds_coords = None
     proj = None
     reference_line_resolution = None
+    horizontal_line_resolution = None
     elevation_line_max_length = None
     dem_data = None
     nodes = {}
@@ -62,12 +65,13 @@ class OSMToOpenDrive(osmium.SimpleHandler):
     junctions = {}
     opendrive_id_count = 0
 
-    def __init__(self, dataset, reference_line_resolution=0.1, elevation_line_max_length=25.0):
+    def __init__(self, dataset, reference_line_resolution=0.25, horizontal_line_resolution=0.25, elevation_line_max_length=25.0):
         self.dataset = dataset
         self.bounds_meters = self.dataset.getBoundsInMeters()
         self.bounds_coords = self.dataset.getBoundsInCoords()
         self.proj = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:6576", always_xy=True)
         self.reference_line_resolution = reference_line_resolution
+        self.horizontal_line_resolution = horizontal_line_resolution
         self.elevation_line_max_length = elevation_line_max_length
         self.dem_data = self.dataset.loadDEMs(self.dataset.getAllTiles())
 
@@ -148,10 +152,11 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             }
             self.ways[w_id] = way
 
-    def isNodeInBridge(self, nid):
-        node = self.nodes[nid]
+    @classmethod
+    def isNodeInBridge(self, nid, nodes, ways):
+        node = nodes[nid]
         for wid in node["connected_ways"]:
-            way = self.ways[wid]
+            way = ways[wid]
             if way["bridge"]:
                 return True
         return False
@@ -211,15 +216,16 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         return str(new_id)
     
     # For now, even curves are modeled as lines. Each pair of nodes in a way constitutes a line.
-    def generatePlanViewFromOSMWayData(self, way_data):
+    @classmethod
+    def generatePlanViewFromOSMWayData(self, converter, way_data):
         geometries = []
         s = 0.0
         if len(way_data["nodes"]) > 1: # At least two nodes!
             # Assume each node is in succession of the previous.
             node_pairs = _generatePairs(way_data["nodes"])
             for pair in node_pairs:
-                node1 = self.nodes[pair[0]]
-                node2 = self.nodes[pair[1]]
+                node1 = converter.nodes[pair[0]]
+                node2 = converter.nodes[pair[1]]
                 x1 = node1["meters_coordinates"][0]
                 y1 = node1["meters_coordinates"][1]
                 x2 = node2["meters_coordinates"][0]
@@ -230,7 +236,8 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                 s = s + pair_length
         return opendrive.PlanView(geometries=geometries), s
     
-    def generateLaneOffsetsFromOSMWayData(self, way_data):
+    @classmethod
+    def generateLaneOffsetsFromOSMWayData(cls, way_data):
         lane_offsets = []
         if way_data["oneway"]:
             # Center will be to the lefthand side of the road completely - all lanes will be in the right section.
@@ -240,7 +247,8 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         return lane_offsets
     
     # Any opposite direction lanes go here.
-    def generateLeftLanesFromOSMWayData(self, way_data):
+    @classmethod
+    def generateLeftLanesFromOSMWayData(cls, way_data):
         lanes = []
         lane_count = way_data["lane_count_backward"]
         lane_width = way_data["lane_width"]
@@ -251,10 +259,12 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             lanes.append(opendrive.Lane(id=i, type=lane_type, level=False, widths=[opendrive.Width(sOffset=0.0, a=lane_width, b=0.0, c=0.0, d=0.0)]))
         return opendrive.LaneGroup(lanes=lanes)
     
-    def generateCenterLaneFromOSMWayData(self, way_data):
+    @classmethod
+    def generateCenterLaneFromOSMWayData(cls, way_data):
         return opendrive.LaneGroup(lanes=[opendrive.Lane(id=0)])
 
-    def generateRightLanesFromOSMWayData(self, way_data):
+    @classmethod
+    def generateRightLanesFromOSMWayData(cls, way_data):
         lanes = []
         lane_count = way_data["lane_count_forward"]
         lane_width = way_data["lane_width"]
@@ -267,54 +277,60 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         return opendrive.LaneGroup(lanes=lanes)
     
     # By default, only one lane section
-    def generateLaneSectionsFromOSMWayData(self, way_data):
+    @classmethod
+    def generateLaneSectionsFromOSMWayData(cls, way_data):
         lane_sections = []
         s = 0.0
         single_side = False
-        left_group = self.generateLeftLanesFromOSMWayData(way_data)
-        center_group = self.generateCenterLaneFromOSMWayData(way_data)
-        right_group = self.generateRightLanesFromOSMWayData(way_data)
+        left_group = cls.generateLeftLanesFromOSMWayData(way_data)
+        center_group = cls.generateCenterLaneFromOSMWayData(way_data)
+        right_group = cls.generateRightLanesFromOSMWayData(way_data)
 
         lane_sections.append(opendrive.LaneSection(s=s, singleSide=single_side, left=left_group, center=center_group, right=right_group))
         return lane_sections
     
-    def generateLanesFromOSMWayData(self, way_data):
-        lane_offsets = self.generateLaneOffsetsFromOSMWayData(way_data)
-        lane_sections = self.generateLaneSectionsFromOSMWayData(way_data)
+    @classmethod
+    def generateLanesFromOSMWayData(cls, way_data):
+        lane_offsets = cls.generateLaneOffsetsFromOSMWayData(way_data)
+        lane_sections = cls.generateLaneSectionsFromOSMWayData(way_data)
 
         return opendrive.Lanes(laneOffsets=lane_offsets, laneSections=lane_sections)
     
-    def generateRoadLinkageFromOSMWayData(self, way_data):
+    @classmethod
+    def generateRoadLinkageFromOSMWayData(cls, converter, way_data):
         # Generate predecessor
         predecessor = None
         if way_data["predecessor_way"] != None:
-            predecessor_way = self.ways[way_data["predecessor_way"]]
+            predecessor_way = converter.ways[way_data["predecessor_way"]]
             shared_nid = list(set(way_data["nodes"]) & set(predecessor_way["nodes"]))[0]
-            shared_node = self.nodes[shared_nid]
+            shared_node = converter.nodes[shared_nid]
             predecessor_type = "junction" if (shared_node["junction_id"] != "-1") else "road"
             element_id = predecessor_way["opendrive_id"] if (predecessor_type == "road") else shared_node["junction_id"]
             predecessor = opendrive.PredecessorSuccessor(elementType=predecessor_type, elementId=element_id, tag="predecessor")
         # Generate successor
         successor = None
         if way_data["successor_way"] != None:
-            successor_way = self.ways[way_data["successor_way"]]
+            successor_way = converter.ways[way_data["successor_way"]]
             shared_nid = list(set(way_data["nodes"]) & set(successor_way["nodes"]))[0]
-            shared_node = self.nodes[shared_nid]
+            shared_node = converter.nodes[shared_nid]
             successor_type = "junction" if (shared_node["junction_id"] != "-1") else "road"
             element_id = successor_way["opendrive_id"] if (successor_way == "road") else shared_node["junction_id"]
             successor = opendrive.PredecessorSuccessor(elementType=successor_type, elementId=element_id, tag="successor")
         return opendrive.Link(predecessor=predecessor, successor=successor)
     
-    def getDEMElevationAtPoint(self, position):
-        return self.dataset.minHeightAtXYMeters(self.dem_data, (position[1] + self.bounds_meters[0], position[2] + self.bounds_meters[1]))
+    @classmethod
+    def getDEMElevationAtPoint(cls, converter, position):
+        return converter.dataset.minHeightAtXYMeters(converter.dem_data, (position[1] + converter.bounds_meters[0], position[2] + converter.bounds_meters[1]))
     
-    def getDEMElevationsAtPoints(self, positions):
+    @classmethod
+    def getDEMElevationsAtPoints(self, converter, positions):
         elevations = []
         for position in positions:
-            elevations.append(self.getDEMElevationAtPoint(position))
+            elevations.append(self.getDEMElevationAtPoint(converter, position))
         return np.array(elevations)
     
-    def regressElevationEquationFromReferenceLine(self, positions, elevations):
+    @classmethod
+    def regressElevationEquationFromReferenceLine(cls, positions, elevations):
         #print(positions[:, 0].min(), elevations.min(), positions[:, 0].max(), elevations.max())
         degree = len(positions) if len(positions) < 4 else 4
         s0 = positions[0][0]
@@ -346,14 +362,48 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             #print(coeff)
         return opendrive.Elevation(s=s0, a=coeff[0], b=coeff[1], c=coeff[2], d=coeff[3])
     
-    def generateElevationSequencesFromReferenceline(self, positions, elevations):
+    @classmethod
+    def regressShapeEquationAcrossLanes(cls, s, t_positions, elevations):
+        #print(positions[:, 0].min(), elevations.min(), positions[:, 0].max(), elevations.max())
+        degree = len(t_positions) if len(t_positions) < 4 else 4
+        t0 = t_positions[0]
+        if degree == 1:
+            return opendrive.Shape(s=s, t=t0, a=elevations[0], b=0.0, c=0.0, d=0.0)
+        L = t_positions[-1] - t0
+        tn = ((t_positions - t0) / L)
+        coeff = None
+        if degree == 2:
+            def model(tn, a, b):
+                t = L*tn
+                return a + b*t
+            coeff, _ = curve_fit(model, tn, elevations)
+            coeff = np.array([coeff[0], coeff[1], 0.0, 0.0])
+            #print(coeff)
+        elif degree == 3:
+            def model(tn, a, b, c):
+                t = L*tn
+                return a + b*t + c*(t**2)
+            coeff, _ = curve_fit(model, tn, elevations)
+            coeff = np.array([coeff[0], coeff[1], coeff[2], 0.0])
+            #print(coeff)
+        else:
+            def model(tn, a, b, c, d):
+                t = L*tn
+                return a + b*t + c*(t**2) + d*(t**3)
+            coeff, _ = curve_fit(model, tn, elevations)
+            coeff = np.array([coeff[0], coeff[1], coeff[2], coeff[3]])
+            #print(coeff)
+        return opendrive.Shape(s=s, t=t0, a=coeff[0], b=coeff[1], c=coeff[2], d=coeff[3])
+    
+    @classmethod
+    def generateElevationSequencesFromReferenceline(cls, converter, positions, elevations):
         position_elevation_splits = []
         elevation_entries = []
         current_position_split = []
         current_elevation_split = []
         for position, elevation in zip(positions, elevations):
             position_s, position_x, position_y, position_phi = position
-            if int(position_s / self.elevation_line_max_length) > len(position_elevation_splits):
+            if int(position_s / converter.elevation_line_max_length) > len(position_elevation_splits):
                 current_position_split = np.array(current_position_split)
                 current_elevation_split = np.array(current_elevation_split)
                 position_elevation_splits.append([current_position_split, current_elevation_split])
@@ -370,36 +420,41 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             current_elevation_split = np.array(current_elevation_split)
             position_elevation_splits.append([current_position_split, current_elevation_split])
         for (position_split, elevation_split) in position_elevation_splits:
-            elevation_entries.append(self.regressElevationEquationFromReferenceLine(position_split, elevation_split))
+            elevation_entries.append(cls.regressElevationEquationFromReferenceLine(position_split, elevation_split))
         return elevation_entries
     
-    def markPositionsWithBridges(self, way_data, positions, plan_view):
+    @classmethod
+    def markPositionsWithBridges(cls, converter, way_data, positions, plan_view):
         regions = []
         for i, nid in enumerate(way_data["nodes"]):
-            if self.isNodeInBridge(nid):
-                bridge_node = self.nodes[nid]
+            if cls.isNodeInBridge(nid, converter.nodes, converter.ways):
+                bridge_node = converter.nodes[nid]
                 bridge_node_coordinates = bridge_node["meters_coordinates"]
                 bridge_s, _ = plan_view.projectXYToS(bridge_node_coordinates[0], bridge_node_coordinates[1])
                 # Mark nodes behind and ahead as connected to the bridge
                 behind_id = i - 1
                 ahead_id = i + 1
+                bridge_osm_elevation = bridge_node_coordinates[2]
+                bridge_dem_elevation = cls.getDEMElevationAtPoint(converter, [None, bridge_node_coordinates[0], bridge_node_coordinates[1], None])
+                bridge_elevation = max(bridge_osm_elevation, bridge_dem_elevation)
                 if (behind_id >= 0):
                     behind_nid = way_data["nodes"][behind_id]
-                    behind_node = self.nodes[behind_nid]
+                    behind_node = converter.nodes[behind_nid]
                     behind_node_coordinates = behind_node["meters_coordinates"]
                     behind_s, _ = plan_view.projectXYToS(behind_node_coordinates[0], behind_node_coordinates[1])
-                    behind_elevation = self.getDEMElevationAtPoint([None, behind_node_coordinates[0], behind_node_coordinates[1], None])
-                    regions.append([behind_s, bridge_s, behind_elevation, bridge_node_coordinates[2]])
+                    behind_elevation = cls.getDEMElevationAtPoint(converter, [None, behind_node_coordinates[0], behind_node_coordinates[1], None])
+                    regions.append([behind_s, bridge_s, behind_elevation, bridge_elevation])
                 if (ahead_id < len(way_data["nodes"])):
                     ahead_nid = way_data["nodes"][ahead_id]
-                    ahead_node = self.nodes[ahead_nid]
+                    ahead_node = converter.nodes[ahead_nid]
                     ahead_node_coordinates = ahead_node["meters_coordinates"]
                     ahead_s, _ = plan_view.projectXYToS(ahead_node_coordinates[0], ahead_node_coordinates[1])
-                    ahead_elevation = self.getDEMElevationAtPoint([None, ahead_node_coordinates[0], ahead_node_coordinates[1], None])
-                    regions.append([bridge_s, ahead_s, bridge_node_coordinates[2], ahead_elevation])
+                    ahead_elevation = cls.getDEMElevationAtPoint(converter, [None, ahead_node_coordinates[0], ahead_node_coordinates[1], None])
+                    regions.append([bridge_s, ahead_s, bridge_elevation, ahead_elevation])
         return regions
     
-    def annotateDEMElevationsWithBridgeData(self, elevations_reference_line, way_data, positions, positions_bridges):
+    @classmethod
+    def annotateDEMElevationsWithBridgeData(cls, elevations_reference_line, way_data, positions, positions_bridges):
         new_elevations_reference_line = []
         for i, position in enumerate(positions):
             position_s = position[0]
@@ -407,8 +462,8 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             for (bounds_min, bounds_max, elevation_min, elevation_max) in positions_bridges:
                 bounds_length = bounds_max - bounds_min 
                 if (bounds_min <= position_s) and (position_s <= bounds_max) and (bounds_length > 0):
-                    print(bounds_min, bounds_max, elevation_min, elevation_max)
-                    print(position_s, bounds_min, bounds_length)
+                    #print(bounds_min, bounds_max, elevation_min, elevation_max)
+                    #print(position_s, bounds_min, bounds_length)
                     elevation_max_weight = ((position_s - bounds_min) / bounds_length)
                     elevation_min_weight = 1.0 - elevation_max_weight
                     current_elevation = (elevation_min * elevation_min_weight) + (elevation_max * elevation_max_weight)
@@ -416,28 +471,30 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             new_elevations_reference_line.append(current_elevation)
         return np.array(new_elevations_reference_line)
     
-    def generateElevationProfileFromOSMWayData(self, way_data, plan_view, road_length):
+    @classmethod
+    def generateElevationProfileFromOSMWayData(cls, converter, way_data, plan_view, road_length):
         elevations = []
-        positions = plan_view.sampleReferenceLine(self.reference_line_resolution)
-        positions_bridges = self.markPositionsWithBridges(way_data, positions, plan_view)
+        positions = plan_view.sampleReferenceLine(converter.reference_line_resolution)
+        positions_bridges = cls.markPositionsWithBridges(converter, way_data, positions, plan_view)
         elevations_reference_line = None
         # For bridges we linearly interpolate between the elevations given from the start to the end
         # We assume bridges do not dip, or curve up significantly between nodes.
         if way_data["bridge"]:
-            beginning_node = self.nodes[way_data["nodes"][0]]
-            ending_node = self.nodes[way_data["nodes"][-1]]
+            beginning_node = converter.nodes[way_data["nodes"][0]]
+            ending_node = converter.nodes[way_data["nodes"][-1]]
             beginning_node_coordinates = beginning_node["meters_coordinates"]
             ending_node_coordinates = ending_node["meters_coordinates"]
             hdg = _giveHeading(beginning_node_coordinates[0], beginning_node_coordinates[1], ending_node_coordinates[0], ending_node_coordinates[1])
             positions = np.array([[0.0, beginning_node_coordinates[0], beginning_node_coordinates[1], hdg], [road_length, ending_node_coordinates[0], ending_node_coordinates[1], hdg]])
             elevations_reference_line = np.array([beginning_node_coordinates[2], ending_node_coordinates[2]])
         else:
-            elevations_reference_line = self.getDEMElevationsAtPoints(positions)
-            elevations_reference_line = self.annotateDEMElevationsWithBridgeData(elevations_reference_line, way_data, positions, positions_bridges)
-        elevations = self.generateElevationSequencesFromReferenceline(positions, elevations_reference_line)
+            elevations_reference_line = cls.getDEMElevationsAtPoints(converter, positions)
+            elevations_reference_line = cls.annotateDEMElevationsWithBridgeData(elevations_reference_line, way_data, positions, positions_bridges)
+        elevations = cls.generateElevationSequencesFromReferenceline(converter, positions, elevations_reference_line)
         return opendrive.ElevationProfile(elevations=elevations)
 
-    def convertLinePlanViewToArcs(self, plan_view, min_arc_points=5, k_tol=0.01):
+    @classmethod
+    def convertLinePlanViewToArcs(cls, plan_view, min_arc_points=5, k_tol=0.01):
         geometries = []
         s_arc = 0.0
         i = 0
@@ -479,22 +536,43 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                 i += 1
 
         return opendrive.PlanView(geometries=geometries), s_arc
+    
+    @classmethod
+    def generateLateralProfileForRoad(cls, converter, road: opendrive.Road, way_data):
+        shapes = []
+        for s in np.arange(0, road.length+converter.reference_line_resolution, converter.reference_line_resolution):
+            max_t, min_t = road.generateTBoundsAtS(s)
+            t_positions = np.arange(min_t, max_t + converter.horizontal_line_resolution, converter.horizontal_line_resolution)
+            xy_positions = []
+            for t in t_positions:
+                x, y = road.projectSAndTToXY(s, t)
+                xy_positions.append([None, x, y, None])
+            elevations = cls.getDEMElevationsAtPoints(converter, xy_positions)
+            center_x, center_y = road.projectSAndTToXY(s, 0.0)
+            center_elevation = cls.getDEMElevationAtPoint(converter, [None, center_x, center_y, None])
+            elevations -= center_elevation
+            shapes.append(cls.regressShapeEquationAcrossLanes(s, t_positions, elevations))
+        return opendrive.LateralProfile(shapes=shapes)
 
     def generateRoadFromOSMWay(self, wid):
         way_data = self.ways[wid]
         id = self.ways[wid]["opendrive_id"]
-        plan_view, road_length = self.generatePlanViewFromOSMWayData(way_data)
+        plan_view, road_length = self.generatePlanViewFromOSMWayData(self, way_data)
         #plan_view, road_length = self.convertLinePlanViewToArcs(plan_view)
-        elevation_profile = self.generateElevationProfileFromOSMWayData(way_data, plan_view, road_length)
+        elevation_profile = self.generateElevationProfileFromOSMWayData(self, way_data, plan_view, road_length)
         lanes = self.generateLanesFromOSMWayData(way_data)
-        linkage = self.generateRoadLinkageFromOSMWayData(way_data)
-        return opendrive.Road(id=id, length=road_length, planView=plan_view, elevationProfile=elevation_profile, lanes=lanes, link=linkage)
+        linkage = self.generateRoadLinkageFromOSMWayData(self, way_data)
+        generated_road = opendrive.Road(id=id, length=road_length, planView=plan_view, elevationProfile=elevation_profile, lanes=lanes, link=linkage)
+        lateral_profile = self.generateLateralProfileForRoad(self, generated_road, way_data)
+        generated_road.lateralProfile = lateral_profile
+        return generated_road
     
     def generateRoadsFromOSMWays(self):
         roads = {}
         for wid in self.ways:
             road = self.generateRoadFromOSMWay(wid)
             roads[road.id] = road
+            print(road.id)
         return roads
     
     def generateJunctionsFromOSMNodes(self):
