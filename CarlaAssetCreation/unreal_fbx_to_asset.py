@@ -11,6 +11,7 @@ asset_names = sys.argv[3:]
 with open(manifest_path, "r") as f:
     manifest_data = json.load(f)
 
+
 def importAssets(manifest_data, asset_type, asset_names):
     asset_type_data = manifest_data[asset_type]
     tasks = []
@@ -39,9 +40,9 @@ def importAssets(manifest_data, asset_type, asset_names):
         task.automated = True
         task.save = True
         tasks.append(task)
-    
+
     unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
-    
+
     for asset_name in asset_names:
         full_unreal_path = asset_type_data[asset_name]["unreal_path"]
         dest_name = os.path.basename(asset_type_data[asset_name]["unreal_path"])
@@ -57,5 +58,6 @@ def importAssets(manifest_data, asset_type, asset_names):
         if isinstance(mesh, unreal.StaticMesh) or isinstance(mesh, unreal.SkeletalMesh):
             mesh.set_material(0, material)
             unreal.EditorAssetLibrary.save_loaded_asset(mesh)
+
 
 importAssets(manifest_data, asset_type, asset_names)

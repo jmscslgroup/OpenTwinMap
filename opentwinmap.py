@@ -3,6 +3,7 @@ from OpenDrive import osm_to_opendrive
 from CarlaAssetCreation.carla_asset_creator import CarlaAssetCreator
 from CarlaAssetCreation.carla_asset_importer import CarlaAssetImporter
 
+
 class OpenTwinMap:
     unreal_engine_path = "/home/richarwa/SecondSSD/UnrealEngine_4.26/"
     carla_path = "/home/richarwa/SecondSSD/carla/"
@@ -10,7 +11,7 @@ class OpenTwinMap:
     dataset_path = "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/"
     loaded_dataset_path = "./SubsetSelection/"
     full_cooked_dataset_path = "./CarlaCooked/"
-    
+
     def __init__(self):
         pass
 
@@ -39,7 +40,9 @@ class OpenTwinMap:
         converter.saveMetadata()
 
     def export3DAssetsToCARLA(self):
-        converter = CarlaAssetImporter(self.unreal_engine_path, self.carla_path, self.full_cooked_dataset_path)
+        converter = CarlaAssetImporter(
+            self.unreal_engine_path, self.carla_path, self.full_cooked_dataset_path
+        )
         converter.clearUnrealContent()
         converter.convertTerrainFromFbxToUnreal()
         converter.convertRoadsFromFbxToUnreal()
@@ -50,6 +53,7 @@ class OpenTwinMap:
         self.convertOSMToOpenDrive()
         self.create3DAssets()
         self.export3DAssetsToCARLA()
+
 
 if __name__ == "__main__":
     pipeline = OpenTwinMap()

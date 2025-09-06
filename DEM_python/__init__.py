@@ -1,5 +1,6 @@
 import pandas
 
+
 class DEM:
     path = None
     height = None
@@ -29,7 +30,9 @@ class DEM:
 
     @classmethod
     def load_csv_data(cls, path):
-        return pandas.read_csv(path, names=["x", "y", "z"], sep=" ").sort_values(by=["y", "x"], ascending=[True, True])
+        return pandas.read_csv(path, names=["x", "y", "z"], sep=" ").sort_values(
+            by=["y", "x"], ascending=[True, True]
+        )
 
     @classmethod
     def from_csv(cls, path, grid_size, nodata_value):
@@ -39,25 +42,37 @@ class DEM:
     @classmethod
     def from_dems(cls, dems, grid_size, nodata_value):
         dem_series = [dem.csv_data for dem in dems]
-        csv_data = pandas.concat(dem_series, ignore_index=True).sort_values(by=["y", "x"], ascending=[True, True])
+        csv_data = pandas.concat(dem_series, ignore_index=True).sort_values(
+            by=["y", "x"], ascending=[True, True]
+        )
         return cls(csv_data, grid_size, nodata_value)
 
     @classmethod
-    #Default margin of 10 meters
+    # Default margin of 10 meters
     def clip_dem(cls, dem, bottom_left, top_right, margins=32.8084):
-        float_bottom_x, float_bottom_y = (bottom_left[0] - dem.x_origin) / dem.grid_size, (bottom_left[1] - dem.y_origin) / dem.grid_size
-        float_top_x, float_top_y = (top_right[0] - dem.x_origin) / dem.grid_size, (top_right[1] - dem.y_origin) / dem.grid_size
-        bottom_x, bottom_y = dem._clip_indices(int(float_bottom_x - margins), int(float_bottom_y - margins))
-        top_x, top_y = dem._clip_indices(int(float_top_x + margins), int(float_top_y + margins))
+        float_bottom_x, float_bottom_y = (
+            bottom_left[0] - dem.x_origin
+        ) / dem.grid_size, (bottom_left[1] - dem.y_origin) / dem.grid_size
+        float_top_x, float_top_y = (top_right[0] - dem.x_origin) / dem.grid_size, (
+            top_right[1] - dem.y_origin
+        ) / dem.grid_size
+        bottom_x, bottom_y = dem._clip_indices(
+            int(float_bottom_x - margins), int(float_bottom_y - margins)
+        )
+        top_x, top_y = dem._clip_indices(
+            int(float_top_x + margins), int(float_top_y + margins)
+        )
         indices = dem._compute_dem_indices(bottom_x, bottom_y, top_x, top_y)
         clipped_dem_data = dem.csv_data.iloc[indices].copy()
         result = DEM(clipped_dem_data, dem.grid_size, dem.nodata_value)
         result.original_x_bottom_left = dem.original_x_bottom_left
         result.original_y_bottom_left = dem.original_y_bottom_left
         return result
-        
+
     def _clip_indices(self, x, y):
-        return max(0, min(self.last_width_index, x)), max(0, min(self.last_height_index, y))
+        return max(0, min(self.last_width_index, x)), max(
+            0, min(self.last_height_index, y)
+        )
 
     def _compute_dem_index(self, x, y):
         return (y * self.width_count) + x
@@ -83,9 +98,13 @@ class DEM:
         bottom_right_index = self._compute_dem_index(bottom_right_x, bottom_right_y)
         top_right_index = self._compute_dem_index(top_right_x, top_right_y)
         del_x, del_y = (float_x - x), (float_y - y)
-        bottom_left_value = (1.0 - del_x) * (1.0 - del_y) * self.csv_data.iloc[bottom_left_index].z
+        bottom_left_value = (
+            (1.0 - del_x) * (1.0 - del_y) * self.csv_data.iloc[bottom_left_index].z
+        )
         top_left_value = (1.0 - del_x) * del_y * self.csv_data.iloc[top_left_index].z
-        bottom_right_value = del_x * (1.0 - del_y) * self.csv_data.iloc[bottom_right_index].z
+        bottom_right_value = (
+            del_x * (1.0 - del_y) * self.csv_data.iloc[bottom_right_index].z
+        )
         top_right_value = del_x * del_y * self.csv_data.iloc[top_right_index].z
 
         return bottom_left_value + top_left_value + bottom_right_value + top_right_value

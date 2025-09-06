@@ -10,14 +10,17 @@ import open3d
 target_json = "./metadata.json"
 
 meters_to_feet = 3.28084
-feet_to_meters = 1.0/meters_to_feet
+feet_to_meters = 1.0 / meters_to_feet
+
 
 def get_metadata():
-	with open(target_json, "r") as f:
-		data = json.load(f)
-	return data
+    with open(target_json, "r") as f:
+        data = json.load(f)
+    return data
+
 
 metadata = get_metadata()
+
 
 def convert_laz_to_las_and_pcd(laz_file):
     if not Path(laz_file).exists():
@@ -40,13 +43,19 @@ def convert_laz_to_las_and_pcd(laz_file):
     open3d.io.write_point_cloud(pcd_file, pcd)
 
 
-laz_files = [metadata[entry]["LAZ"]["path"] for entry in metadata if entry != "selected_origin"]
+laz_files = [
+    metadata[entry]["LAZ"]["path"] for entry in metadata if entry != "selected_origin"
+]
 
 
-result = list(tqdm(
-    joblib.Parallel(return_as="generator", n_jobs=48)
-    (joblib.delayed(convert_laz_to_las_and_pcd)(laz_file) for laz_file in laz_files), 
-    total=len(laz_files)
-))
-#for laz_file in laz_files:
+result = list(
+    tqdm(
+        joblib.Parallel(return_as="generator", n_jobs=48)(
+            joblib.delayed(convert_laz_to_las_and_pcd)(laz_file)
+            for laz_file in laz_files
+        ),
+        total=len(laz_files),
+    )
+)
+# for laz_file in laz_files:
 #    convert_laz_to_las_and_pcd(laz_file)

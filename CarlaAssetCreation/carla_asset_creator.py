@@ -9,11 +9,21 @@ import shapely.geometry
 import xml.etree.ElementTree as ET
 import concurrent.futures
 import sys
+
 sys.path.append(".")
 from .carla_asset_dataset import CarlaAssetDataset
 from OpenDrive.opendrive import OpenDRIVE
 
-def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_data, bounding_box, tile_point_interval, original_bounds):
+
+def _generateTerrainTileMethod(
+    carla_asset_root,
+    full_mesh_path,
+    mesh_path,
+    map_data,
+    bounding_box,
+    tile_point_interval,
+    original_bounds,
+):
     import trimesh
     import numpy as np
     import os
@@ -31,8 +41,8 @@ def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_
     number_of_points_on_side_x = int(tile_size_x / tile_point_interval)
     number_of_points_on_side_y = int(tile_size_y / tile_point_interval)
 
-    #xs = np.linspace(min_x, max_x, number_of_points_on_side_x)
-    #ys = np.linspace(min_y, max_y, number_of_points_on_side_y)
+    # xs = np.linspace(min_x, max_x, number_of_points_on_side_x)
+    # ys = np.linspace(min_y, max_y, number_of_points_on_side_y)
     xs = np.linspace(min_x_dem, max_x_dem, number_of_points_on_side_x)
     ys = np.linspace(min_y_dem, max_y_dem, number_of_points_on_side_y)
     xv, yv = np.meshgrid(xs, ys)
@@ -40,7 +50,7 @@ def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_
     for i in range(yv.shape[0]):
         for j in range(xv.shape[1]):
             zv[i][j] = map_data.minHeightAtXYMeters(dem_data, (xv[i][j], yv[i][j]))
-    
+
     xv = xv.flatten()
     yv = yv.flatten()
     zv = zv.flatten()
@@ -69,7 +79,7 @@ def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
     mesh.visual.uv = uvs
     # Remember, in Unreal, x becomes y, and y becomes x.
-    '''
+    """
     R = trimesh.transformations.rotation_matrix(
         angle=np.radians(-90),
         direction=[0, 0, 1],
@@ -78,14 +88,22 @@ def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_
     if not np.all(np.isfinite(mesh.vertices)):
         raise ValueError("Vertices contain NaNs or Infs")
     mesh.apply_transform(R)
-    '''
-    
+    """
+
     # Let trimesh compute vertex normals for smooth shading
-    #mesh.compute_vertex_normals()
+    # mesh.compute_vertex_normals()
     mesh.export(full_mesh_path)
 
-    min_x, min_y, min_z = min_x_dem - original_bounds[0], min_y_dem - original_bounds[1], min_z_dem - original_bounds[2]
-    max_x, max_y, max_z = max_x_dem - original_bounds[0], max_y_dem - original_bounds[1], max_z_dem - original_bounds[2]
+    min_x, min_y, min_z = (
+        min_x_dem - original_bounds[0],
+        min_y_dem - original_bounds[1],
+        min_z_dem - original_bounds[2],
+    )
+    max_x, max_y, max_z = (
+        max_x_dem - original_bounds[0],
+        max_y_dem - original_bounds[1],
+        max_z_dem - original_bounds[2],
+    )
     mesh_metadata = {}
     mesh_metadata["full_mesh_path"] = full_mesh_path
     mesh_metadata["min_y"] = min_x
@@ -99,24 +117,46 @@ def _generateTerrainTileMethod(carla_asset_root, full_mesh_path, mesh_path, map_
     mesh_metadata["fbx_path"] = mesh_metadata["obj_path"].replace(".obj", ".fbx")
     mesh_metadata["name"] = os.path.splitext(os.path.basename(mesh_path))[0]
     mesh_metadata["unreal_path"] = f'{carla_asset_root}/{mesh_metadata["name"]}'
-    mesh_metadata["material"] = "/Game/Carla/Static/GenericMaterials/Ground/MI_LargeLandscape_Grass.MI_LargeLandscape_Grass"
+    mesh_metadata["material"] = (
+        "/Game/Carla/Static/GenericMaterials/Ground/MI_LargeLandscape_Grass.MI_LargeLandscape_Grass"
+    )
     return mesh_metadata
 
+
 def _convertObjToFbxMethod(obj_path, fbx_path):
-    convert_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "./blender_obj_to_fbx.py"))
+    convert_script_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "./blender_obj_to_fbx.py")
+    )
     try:
         result = subprocess.run(
-            ["blender", "--background", "--python", convert_script_path, "--", obj_path, fbx_path],
+            [
+                "blender",
+                "--background",
+                "--python",
+                convert_script_path,
+                "--",
+                obj_path,
+                fbx_path,
+            ],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         print(result)
         return obj_path, fbx_path
     except subprocess.CalledProcessError as e:
         raise e
 
-def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, original_bounds, max_step=0.1, thickness = 0.5):
+
+def _generateRoadMeshMethod(
+    carla_asset_root,
+    full_mesh_path,
+    mesh_path,
+    road,
+    original_bounds,
+    max_step=0.1,
+    thickness=0.5,
+):
     import math
     import trimesh
     import numpy as np
@@ -152,7 +192,7 @@ def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, o
     # top right, bottom left, bottom right).  We'll normalise u by road
     # length and v by width or depth accordingly.
     for idx, (s, x, y, phi) in enumerate(ref_samples):
-        
+
         # Normalised coordinate along length
         u_coord = s / road.length if road.length > 0 else 0.0
         # Add vertices: order matters for indexing later
@@ -160,12 +200,14 @@ def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, o
         vertices.extend(road.generateRoadVerticesAtS(s, thickness, opendrive_origin))
         # UVs for these four vertices
         # Top surface: v=0 at left, v=1 at right
-        uvs.extend([
-            [u_coord, 0.0],  # left top
-            [u_coord, 1.0],  # right top
-            [u_coord, 0.0],  # left bottom uses same v as top for simplicity
-            [u_coord, 1.0],  # right bottom
-        ])
+        uvs.extend(
+            [
+                [u_coord, 0.0],  # left top
+                [u_coord, 1.0],  # right top
+                [u_coord, 0.0],  # left bottom uses same v as top for simplicity
+                [u_coord, 1.0],  # right bottom
+            ]
+        )
 
     for i in range(num - 1):
         # base index for sample i
@@ -193,7 +235,12 @@ def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, o
     faces.append([lt0, rb0, rt0])
     faces.append([lt0, rb0, lb0])
     # End cap: last sample indices
-    lt1, rt1, lb1, rb1 = (num - 1) * 4, (num - 1) * 4 + 1, (num - 1) * 4 + 2, (num - 1) * 4 + 3
+    lt1, rt1, lb1, rb1 = (
+        (num - 1) * 4,
+        (num - 1) * 4 + 1,
+        (num - 1) * 4 + 2,
+        (num - 1) * 4 + 3,
+    )
     faces.append([lt1, rb1, lb1])
     faces.append([lt1, rt1, rb1])
 
@@ -203,13 +250,13 @@ def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, o
     min_x, min_y, min_z = vertices_np.min(axis=0)
     max_x, max_y, max_z = vertices_np.max(axis=0)
     vertices_np -= np.array([min_x, min_y, min_z])
-    #min_x, min_y, min_z = min_x - original_bounds[0], min_y - original_bounds[1], min_z - original_bounds[2]
-    #max_x, max_y, max_z = max_x - original_bounds[0], max_y - original_bounds[1], max_z - original_bounds[2]
+    # min_x, min_y, min_z = min_x - original_bounds[0], min_y - original_bounds[1], min_z - original_bounds[2]
+    # max_x, max_y, max_z = max_x - original_bounds[0], max_y - original_bounds[1], max_z - original_bounds[2]
     # Create the mesh
     mesh = trimesh.Trimesh(vertices=vertices_np, faces=faces_np, process=False)
     mesh.visual.uv = uvs
     # Let trimesh compute vertex normals for smooth shading
-    #mesh.compute_vertex_normals()
+    # mesh.compute_vertex_normals()
     mesh.export(full_mesh_path)
 
     mesh_metadata = {}
@@ -220,13 +267,18 @@ def _generateRoadMeshMethod(carla_asset_root, full_mesh_path, mesh_path, road, o
     mesh_metadata["max_x"] = max_y
     mesh_metadata["min_z"] = min_z
     mesh_metadata["max_z"] = max_z
-    mesh_metadata["road_data"] = ET.tostring(road.toXML(), encoding='unicode', method='xml')
+    mesh_metadata["road_data"] = ET.tostring(
+        road.toXML(), encoding="unicode", method="xml"
+    )
     mesh_metadata["obj_path"] = mesh_path
     mesh_metadata["fbx_path"] = mesh_metadata["obj_path"].replace(".obj", ".fbx")
     mesh_metadata["name"] = os.path.splitext(os.path.basename(mesh_path))[0]
     mesh_metadata["unreal_path"] = f'{carla_asset_root}/{mesh_metadata["name"]}'
-    mesh_metadata["material"] = "/Game/Carla/Static/GenericMaterials/RoadPainterMaterials/MI_Road_01.MI_Road_01"
+    mesh_metadata["material"] = (
+        "/Game/Carla/Static/GenericMaterials/RoadPainterMaterials/MI_Road_01.MI_Road_01"
+    )
     return mesh_metadata
+
 
 def _generateMergedRoadMethod(carla_asset_root, group, name, full_mesh_path, mesh_path):
     import numpy as np
@@ -238,19 +290,35 @@ def _generateMergedRoadMethod(carla_asset_root, group, name, full_mesh_path, mes
     os.environ["MKL_NUM_THREADS"] = "1"
     os.environ["NUMEXPR_NUM_THREADS"] = "1"
     os.environ["OMP_NUM_THREADS"] = "1"
-    min_y, min_x, min_z = min([group[group_key]["min_y"] for group_key in group]), min([group[group_key]["min_x"] for group_key in group]), min([group[group_key]["min_z"] for group_key in group])
-    max_y, max_x, max_z = max([group[group_key]["max_y"] for group_key in group]), max([group[group_key]["max_x"] for group_key in group]), max([group[group_key]["max_z"] for group_key in group])
+    min_y, min_x, min_z = (
+        min([group[group_key]["min_y"] for group_key in group]),
+        min([group[group_key]["min_x"] for group_key in group]),
+        min([group[group_key]["min_z"] for group_key in group]),
+    )
+    max_y, max_x, max_z = (
+        max([group[group_key]["max_y"] for group_key in group]),
+        max([group[group_key]["max_x"] for group_key in group]),
+        max([group[group_key]["max_z"] for group_key in group]),
+    )
 
     meshes = []
     for group_key in group:
         group_entry = group[group_key]
         current_mesh = trimesh.load(group_entry["full_mesh_path"], force="mesh")
-        min_y_diff, min_x_diff, min_z_diff = group_entry["min_y"] - min_y, group_entry["min_x"] - min_x, group_entry["min_z"] - min_z
+        min_y_diff, min_x_diff, min_z_diff = (
+            group_entry["min_y"] - min_y,
+            group_entry["min_x"] - min_x,
+            group_entry["min_z"] - min_z,
+        )
         # Define the translation vector (x, y, z)
-        translation_vector = np.array([min_y_diff, min_x_diff, min_z_diff])  # Example: move 5 units in x, -2 units in z
+        translation_vector = np.array(
+            [min_y_diff, min_x_diff, min_z_diff]
+        )  # Example: move 5 units in x, -2 units in z
 
         # Create the translation matrix
-        translation_matrix = trimesh.transformations.translation_matrix(translation_vector)
+        translation_matrix = trimesh.transformations.translation_matrix(
+            translation_vector
+        )
 
         # Apply the transformation to the mesh
         current_mesh.apply_transform(translation_matrix)
@@ -269,9 +337,12 @@ def _generateMergedRoadMethod(carla_asset_root, group, name, full_mesh_path, mes
     mesh_metadata["obj_path"] = mesh_path
     mesh_metadata["fbx_path"] = mesh_metadata["obj_path"].replace(".obj", ".fbx")
     mesh_metadata["name"] = name
-    mesh_metadata["unreal_path"] = f'{carla_asset_root}/{name}'
-    mesh_metadata["material"] = "/Game/Carla/Static/GenericMaterials/RoadPainterMaterials/MI_Road_01.MI_Road_01"
+    mesh_metadata["unreal_path"] = f"{carla_asset_root}/{name}"
+    mesh_metadata["material"] = (
+        "/Game/Carla/Static/GenericMaterials/RoadPainterMaterials/MI_Road_01.MI_Road_01"
+    )
     return mesh_metadata
+
 
 class CarlaAssetCreator:
     opendrive_data = None
@@ -280,12 +351,14 @@ class CarlaAssetCreator:
     metadata = {}
     dem_data = None
     tile_size = 500.0
-    tile_point_interval = 0.3048*5 # 2 ft resolution
+    tile_point_interval = 0.3048 * 5  # 2 ft resolution
     feet_to_meters = 0.3048
 
     def __init__(self, map_data, cooked_path):
         self.metadata["map_name"] = "I24"
-        self.metadata["carla_asset_root"] = f'/Game/CarlaIngestion/{self.metadata["map_name"]}'
+        self.metadata["carla_asset_root"] = (
+            f'/Game/CarlaIngestion/{self.metadata["map_name"]}'
+        )
         self.map_data = map_data
         self.cooked_path = cooked_path
         self.cooked_dataset = CarlaAssetDataset(self.cooked_path, initialized=False)
@@ -293,31 +366,54 @@ class CarlaAssetCreator:
         map_data_bounds = self.map_data.getBoundsInMeters().tolist()
         self.metadata["original_bounds"] = self.map_data.getBoundsInMeters().tolist()
         dem_data_tmp = self.map_data.loadDEMs(self.map_data.getAllTiles())
-        min_z =  dem_data_tmp.get_min() * self.feet_to_meters
+        min_z = dem_data_tmp.get_min() * self.feet_to_meters
         max_z = dem_data_tmp.get_max() * self.feet_to_meters
-        self.metadata["original_bounds"] = [map_data_bounds[0], map_data_bounds[1], min_z, map_data_bounds[2], map_data_bounds[3], max_z]
-        self.metadata["carla_bounds"] = [map_data_bounds[1], map_data_bounds[0], min_z, map_data_bounds[3], map_data_bounds[2], max_z]
+        self.metadata["original_bounds"] = [
+            map_data_bounds[0],
+            map_data_bounds[1],
+            min_z,
+            map_data_bounds[2],
+            map_data_bounds[3],
+            max_z,
+        ]
+        self.metadata["carla_bounds"] = [
+            map_data_bounds[1],
+            map_data_bounds[0],
+            min_z,
+            map_data_bounds[3],
+            map_data_bounds[2],
+            max_z,
+        ]
         del dem_data_tmp
         self.metadata["asset_types"] = ["terrain", "roads", "merged_roads"]
         self.metadata["terrain"] = {}
         self.metadata["roads"] = {}
         self.metadata["merged_roads"] = {}
         self.copyXODR()
-        self.opendrive_data = OpenDRIVE.loadFile(self.cooked_dataset.getFullPath(self.cooked_dataset.xodr_path))
+        self.opendrive_data = OpenDRIVE.loadFile(
+            self.cooked_dataset.getFullPath(self.cooked_dataset.xodr_path)
+        )
 
     def copyXODR(self):
-        shutil.copy(self.map_data.getXODRPath(), self.cooked_dataset.getFullPath(self.cooked_dataset.xodr_path))
+        shutil.copy(
+            self.map_data.getXODRPath(),
+            self.cooked_dataset.getFullPath(self.cooked_dataset.xodr_path),
+        )
         self.metadata["xodr_path"] = self.cooked_dataset.xodr_path
 
     def generateTerrainPath(self, x, y):
-        return os.path.join(self.cooked_dataset.terrain_mesh_path, f"{int(x*1000)}_{int(y*1000)}.obj")
+        return os.path.join(
+            self.cooked_dataset.terrain_mesh_path, f"{int(x*1000)}_{int(y*1000)}.obj"
+        )
 
     def generateRoadPath(self, road):
         return os.path.join(self.cooked_dataset.roads_mesh_path, f"{int(road.id)}.obj")
 
     def generateMergedRoadName(self, group):
         group_list = sorted(list(group))
-        return hashlib.sha256(" ".join([str(group_entry) for group_entry in group_list]).encode()).hexdigest()[:20]
+        return hashlib.sha256(
+            " ".join([str(group_entry) for group_entry in group_list]).encode()
+        ).hexdigest()[:20]
 
     def generateMergedRoadPath(self, group):
         name = self.generateMergedRoadName(group)
@@ -325,34 +421,86 @@ class CarlaAssetCreator:
 
     def getTerrainTileBoundingBox(self, x, y):
         min_x, min_y = x, y
-        max_x, max_y = min(x + self.tile_size, self.metadata["original_bounds"][3]), min(y + self.tile_size, self.metadata["original_bounds"][4])
+        max_x, max_y = min(
+            x + self.tile_size, self.metadata["original_bounds"][3]
+        ), min(y + self.tile_size, self.metadata["original_bounds"][4])
         return np.array([min_x, min_y, max_x, max_y])
 
     def generateTerrain(self, n_jobs=100):
-        terrain_folder = self.cooked_dataset.getFullPath(self.cooked_dataset.terrain_path)
+        terrain_folder = self.cooked_dataset.getFullPath(
+            self.cooked_dataset.terrain_path
+        )
         os.makedirs(terrain_folder, exist_ok=True)
-        mesh_folder = self.cooked_dataset.getFullPath(self.cooked_dataset.terrain_mesh_path)
+        mesh_folder = self.cooked_dataset.getFullPath(
+            self.cooked_dataset.terrain_mesh_path
+        )
         os.makedirs(mesh_folder, exist_ok=True)
 
         terrain_asset_root = f'{self.metadata["carla_asset_root"]}/terrain'
 
         jobs = []
-        for y in np.arange(self.metadata["original_bounds"][1], self.metadata["original_bounds"][4], self.tile_size):
-            for x in np.arange(self.metadata["original_bounds"][0], self.metadata["original_bounds"][3], self.tile_size):
+        for y in np.arange(
+            self.metadata["original_bounds"][1],
+            self.metadata["original_bounds"][4],
+            self.tile_size,
+        ):
+            for x in np.arange(
+                self.metadata["original_bounds"][0],
+                self.metadata["original_bounds"][3],
+                self.tile_size,
+            ):
                 tile_bounding_box = self.getTerrainTileBoundingBox(x, y)
-                mesh_path = self.generateTerrainPath(x,y)
+                mesh_path = self.generateTerrainPath(x, y)
                 full_mesh_path = self.cooked_dataset.getFullPath(mesh_path)
-                jobs.append([terrain_asset_root, full_mesh_path, mesh_path, self.map_data, tile_bounding_box, self.tile_point_interval, self.metadata["original_bounds"]])
+                jobs.append(
+                    [
+                        terrain_asset_root,
+                        full_mesh_path,
+                        mesh_path,
+                        self.map_data,
+                        tile_bounding_box,
+                        self.tile_point_interval,
+                        self.metadata["original_bounds"],
+                    ]
+                )
 
         if n_jobs == 1:
-            for terrain_asset_root, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds in jobs:
-                mesh_metadata = _generateTerrainTileMethod(terrain_asset_root, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds)
+            for (
+                terrain_asset_root,
+                full_mesh_path,
+                mesh_path,
+                map_data,
+                tile_bounding_box,
+                tile_point_interval,
+                original_bounds,
+            ) in jobs:
+                mesh_metadata = _generateTerrainTileMethod(
+                    terrain_asset_root,
+                    full_mesh_path,
+                    mesh_path,
+                    map_data,
+                    tile_bounding_box,
+                    tile_point_interval,
+                    original_bounds,
+                )
                 self.metadata["terrain"][mesh_metadata["name"]] = mesh_metadata
                 print(mesh_metadata["name"])
         else:
             with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
-                futures = [executor.submit(_generateTerrainTileMethod, terrain_asset_root, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds) for terrain_asset_root, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds in jobs]
-                
+                futures = [
+                    executor.submit(
+                        _generateTerrainTileMethod,
+                        terrain_asset_root,
+                        full_mesh_path,
+                        mesh_path,
+                        map_data,
+                        tile_bounding_box,
+                        tile_point_interval,
+                        original_bounds,
+                    )
+                    for terrain_asset_root, full_mesh_path, mesh_path, map_data, tile_bounding_box, tile_point_interval, original_bounds in jobs
+                ]
+
                 for future in concurrent.futures.as_completed(futures):
                     mesh_metadata = future.result()
                     self.metadata["terrain"][mesh_metadata["name"]] = mesh_metadata
@@ -361,7 +509,9 @@ class CarlaAssetCreator:
     def generateRoads(self, n_jobs=100):
         roads_folder = self.cooked_dataset.getFullPath(self.cooked_dataset.roads_path)
         os.makedirs(roads_folder, exist_ok=True)
-        mesh_folder = self.cooked_dataset.getFullPath(self.cooked_dataset.roads_mesh_path)
+        mesh_folder = self.cooked_dataset.getFullPath(
+            self.cooked_dataset.roads_mesh_path
+        )
         os.makedirs(mesh_folder, exist_ok=True)
 
         road_carla_root = f'{self.metadata["carla_asset_root"]}/roads'
@@ -371,17 +521,43 @@ class CarlaAssetCreator:
             road = self.opendrive_data.roads[road_id]
             mesh_path = self.generateRoadPath(road)
             full_mesh_path = self.cooked_dataset.getFullPath(mesh_path)
-            jobs.append([road_carla_root, full_mesh_path, mesh_path, road, self.metadata["original_bounds"]])
-        
+            jobs.append(
+                [
+                    road_carla_root,
+                    full_mesh_path,
+                    mesh_path,
+                    road,
+                    self.metadata["original_bounds"],
+                ]
+            )
+
         if n_jobs == 1:
-            for road_carla_root, full_mesh_path, mesh_path, road, original_bounds in jobs:
-                mesh_metadata = _generateRoadMeshMethod(road_carla_root, full_mesh_path, mesh_path, road, original_bounds)
+            for (
+                road_carla_root,
+                full_mesh_path,
+                mesh_path,
+                road,
+                original_bounds,
+            ) in jobs:
+                mesh_metadata = _generateRoadMeshMethod(
+                    road_carla_root, full_mesh_path, mesh_path, road, original_bounds
+                )
                 self.metadata["roads"][mesh_metadata["name"]] = mesh_metadata
                 print(mesh_metadata["name"])
         else:
             with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
-                futures = [executor.submit(_generateRoadMeshMethod, road_carla_root, full_mesh_path, mesh_path, road, original_bounds) for road_carla_root, full_mesh_path, mesh_path, road, original_bounds in jobs]
-                
+                futures = [
+                    executor.submit(
+                        _generateRoadMeshMethod,
+                        road_carla_root,
+                        full_mesh_path,
+                        mesh_path,
+                        road,
+                        original_bounds,
+                    )
+                    for road_carla_root, full_mesh_path, mesh_path, road, original_bounds in jobs
+                ]
+
                 for future in concurrent.futures.as_completed(futures):
                     mesh_metadata = future.result()
                     self.metadata["roads"][mesh_metadata["name"]] = mesh_metadata
@@ -396,7 +572,12 @@ class CarlaAssetCreator:
         bounding_boxes = {}
         for i, road_name in enumerate(road_keys):
             road_data = self.metadata["roads"][road_name]
-            bounds = (road_data["min_y"], road_data["min_x"], road_data["max_y"], road_data["max_x"])
+            bounds = (
+                road_data["min_y"],
+                road_data["min_x"],
+                road_data["max_y"],
+                road_data["max_x"],
+            )
             index.insert(i, bounds)
             bounding_boxes[i] = bounds
 
@@ -425,9 +606,13 @@ class CarlaAssetCreator:
         return groups
 
     def generateMergedRoads(self, n_jobs=100):
-        merged_roads_folder = self.cooked_dataset.getFullPath(self.cooked_dataset.merged_roads_path)
+        merged_roads_folder = self.cooked_dataset.getFullPath(
+            self.cooked_dataset.merged_roads_path
+        )
         os.makedirs(merged_roads_folder, exist_ok=True)
-        mesh_folder = self.cooked_dataset.getFullPath(self.cooked_dataset.merged_roads_mesh_path)
+        mesh_folder = self.cooked_dataset.getFullPath(
+            self.cooked_dataset.merged_roads_mesh_path
+        )
         os.makedirs(mesh_folder, exist_ok=True)
 
         road_carla_root = f'{self.metadata["carla_asset_root"]}/merged_roads'
@@ -441,16 +626,30 @@ class CarlaAssetCreator:
                 group_metadata[group_entry] = self.metadata["roads"][group_entry]
             mesh_path = self.generateMergedRoadPath(group)
             full_mesh_path = self.cooked_dataset.getFullPath(mesh_path)
-            jobs.append([road_carla_root, group_metadata, name, full_mesh_path, mesh_path])
-        
+            jobs.append(
+                [road_carla_root, group_metadata, name, full_mesh_path, mesh_path]
+            )
+
         if n_jobs == 1:
             for carla_root, group, name, full_mesh_path, mesh_path in jobs:
-                mesh_metadata = _generateMergedRoadMethod(carla_root, group, name, full_mesh_path, mesh_path)
+                mesh_metadata = _generateMergedRoadMethod(
+                    carla_root, group, name, full_mesh_path, mesh_path
+                )
                 self.metadata["merged_roads"][mesh_metadata["name"]] = mesh_metadata
         else:
             with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
-                futures = [executor.submit(_generateMergedRoadMethod, carla_root, group, name, full_mesh_path, mesh_path) for carla_root, group, name, full_mesh_path, mesh_path in jobs]
-                
+                futures = [
+                    executor.submit(
+                        _generateMergedRoadMethod,
+                        carla_root,
+                        group,
+                        name,
+                        full_mesh_path,
+                        mesh_path,
+                    )
+                    for carla_root, group, name, full_mesh_path, mesh_path in jobs
+                ]
+
                 for future in concurrent.futures.as_completed(futures):
                     mesh_metadata = future.result()
                     self.metadata["merged_roads"][mesh_metadata["name"]] = mesh_metadata
@@ -459,19 +658,27 @@ class CarlaAssetCreator:
         jobs = []
         for k in self.metadata[asset_type]:
             mesh_metadata = self.metadata[asset_type][k]
-            jobs.append([self.cooked_dataset.getFullPath(mesh_metadata["obj_path"]), self.cooked_dataset.getFullPath(mesh_metadata["fbx_path"])])
-        
+            jobs.append(
+                [
+                    self.cooked_dataset.getFullPath(mesh_metadata["obj_path"]),
+                    self.cooked_dataset.getFullPath(mesh_metadata["fbx_path"]),
+                ]
+            )
+
         if n_jobs == 1:
             for obj_path, fbx_path in jobs:
                 _convertObjToFbxMethod(obj_path, fbx_path)
                 print(obj_path, fbx_path)
         else:
             with concurrent.futures.ProcessPoolExecutor(max_workers=n_jobs) as executor:
-                futures = [executor.submit(_convertObjToFbxMethod, obj_path, fbx_path) for obj_path, fbx_path in jobs]
-                
+                futures = [
+                    executor.submit(_convertObjToFbxMethod, obj_path, fbx_path)
+                    for obj_path, fbx_path in jobs
+                ]
+
                 for future in concurrent.futures.as_completed(futures):
                     print(future.result())
-        
+
     def convertTerrainFromObjToFbx(self, n_jobs=48):
         self.convertAssetTypeFromObjToFbx("terrain", n_jobs)
 

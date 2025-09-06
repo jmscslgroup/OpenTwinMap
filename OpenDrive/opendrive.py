@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 T = TypeVar("T")
 
+
 def _set_attrib(element: ET.Element, name: str, value) -> None:
     """Helper to set an XML attribute only if value is not None."""
     if value is not None:
@@ -30,6 +31,7 @@ def _find_children(element: ET.Element, tag: str) -> List[ET.Element]:
     """Return a list of direct child elements matching tag."""
     return [child for child in element if child.tag == tag]
 
+
 def _indent(elem, level=0, indent_size="\t"):
     i = "\n" + level * indent_size
     if len(elem):
@@ -50,6 +52,7 @@ def _indent(elem, level=0, indent_size="\t"):
         # No children: place this element's closing tag at the current level
         if level and not (elem.tail and elem.tail.strip()):
             elem.tail = i
+
 
 @dataclass
 class GeoReference:
@@ -110,7 +113,9 @@ class Header:
         if element is None:
             raise ValueError("Header element is required")
         geo_ref_elem = element.find("geoReference")
-        geo_ref = GeoReference.fromXML(geo_ref_elem) if geo_ref_elem is not None else None
+        geo_ref = (
+            GeoReference.fromXML(geo_ref_elem) if geo_ref_elem is not None else None
+        )
         return cls(
             revMajor=_get_attrib(element, "revMajor", int),
             revMinor=_get_attrib(element, "revMinor", int),
@@ -167,6 +172,7 @@ class PredecessorSuccessor:
 @dataclass
 class Neighbor:
     """Neighbor road link in ``<link>`` section of a road."""
+
     side: str
     elementId: str
     direction: str
@@ -190,6 +196,7 @@ class Neighbor:
 @dataclass
 class Link:
     """Represents the ``<link>`` element inside a road."""
+
     predecessor: Optional[PredecessorSuccessor] = None
     successor: Optional[PredecessorSuccessor] = None
     neighbors: List[Neighbor] = field(default_factory=list)
@@ -212,10 +219,14 @@ class Link:
     def fromXML(cls: Type[T], element: ET.Element) -> T:
         pred_elem = element.find("predecessor")
         succ_elem = element.find("successor")
-        pred = PredecessorSuccessor.fromXML(pred_elem) if pred_elem is not None else None
+        pred = (
+            PredecessorSuccessor.fromXML(pred_elem) if pred_elem is not None else None
+        )
         if pred is not None:
             pred.tag = "predecessor"
-        succ = PredecessorSuccessor.fromXML(succ_elem) if succ_elem is not None else None
+        succ = (
+            PredecessorSuccessor.fromXML(succ_elem) if succ_elem is not None else None
+        )
         if succ is not None:
             succ.tag = "successor"
         neighbors = [Neighbor.fromXML(ne) for ne in element.findall("neighbor")]
@@ -225,6 +236,7 @@ class Link:
 @dataclass
 class Speed:
     """Defines a speed limit in either road ``<type>`` or lane context."""
+
     max: Optional[str] = None
     unit: Optional[str] = None
 
@@ -245,6 +257,7 @@ class Speed:
 @dataclass
 class RoadType:
     """Represents a ``<type>`` record within a road."""
+
     s: float
     type: str
     country: Optional[str] = None
@@ -286,6 +299,7 @@ class Line:
 @dataclass
 class Arc:
     """Geometry shape for a circular arc segment."""
+
     curvature: float
 
     def toXML(self) -> ET.Element:
@@ -301,6 +315,7 @@ class Arc:
 @dataclass
 class Spiral:
     """Geometry shape for a clothoid spiral segment."""
+
     curvStart: float
     curvEnd: float
 
@@ -321,6 +336,7 @@ class Spiral:
 @dataclass
 class Poly3:
     """Geometry shape for a cubic polynomial segment."""
+
     a: float
     b: float
     c: float
@@ -347,6 +363,7 @@ class Poly3:
 @dataclass
 class ParamPoly3:
     """Geometry shape for a parametric cubic polynomial segment."""
+
     aU: float
     bU: float
     cU: float
@@ -388,6 +405,7 @@ class ParamPoly3:
 @dataclass
 class Geometry:
     """An individual geometry segment inside ``<planView>``."""
+
     s: float
     x: float
     y: float
@@ -408,7 +426,14 @@ class Geometry:
     @classmethod
     def fromXML(cls: Type[T], element: ET.Element) -> T:
         # Determine shape type by reading first child tag
-        shape_elem = next((child for child in element if child.tag in {"line", "arc", "spiral", "poly3", "paramPoly3"}), None)
+        shape_elem = next(
+            (
+                child
+                for child in element
+                if child.tag in {"line", "arc", "spiral", "poly3", "paramPoly3"}
+            ),
+            None,
+        )
         shape: object
         if shape_elem is None:
             raise ValueError("Geometry element must contain a shape child")
@@ -432,7 +457,7 @@ class Geometry:
             length=_get_attrib(element, "length", float, 0.0),
             shape=shape,
         )
-    
+
     def samplePosition(self, ds):
         if isinstance(self.shape, Line):
             x = self.x + (ds * math.cos(self.hdg))
@@ -454,13 +479,13 @@ class Geometry:
                 return np.array([x, y, phi])
         else:
             raise NotImplementedError(f"Unsupported geometry type: {self.shape}")
-    
+
     def startPosition(self):
         return self.samplePosition(0.0)
-    
+
     def endPosition(self):
         return self.samplePosition(self.length)
-    
+
     def samplePositions(self, num_samples):
         """Sample (x, y, phi) positions along this geometry.
 
@@ -546,12 +571,12 @@ class Geometry:
         else:
             raise NotImplementedError(f"Unsupported geometry type: {self.shape}")
         return self.s + s_local, dist
-    
+
     def projectSAndTToXY(self, s, t=0.0):
         s = s - self.s
         if isinstance(self.shape, Line):
             # 90 degrees pointing the left side of the geometry in relation to its heading
-            hdg_orthogonal = self.hdg + (math.pi/2)
+            hdg_orthogonal = self.hdg + (math.pi / 2)
             dx_ds = math.cos(self.hdg)
             dy_ds = math.sin(self.hdg)
             dx_dt = math.cos(hdg_orthogonal)
@@ -561,10 +586,12 @@ class Geometry:
             return (original_x + (dx_ds * s), original_y + (dy_ds * s))
         else:
             raise NotImplementedError(f"Unsupported geometry type: {self.shape}")
-            
+
+
 @dataclass
 class PlanView:
     """Container for a sequence of geometry segments."""
+
     geometries: List[Geometry] = field(default_factory=list)
 
     def toXML(self) -> ET.Element:
@@ -609,21 +636,23 @@ class PlanView:
                 best_dist = dist
                 best_s = current_s
         return best_s, best_dist
-    
+
     def getGeometryAtS(self, s):
         current_geom = None
         for geom in self.geometries:
             if geom.s <= s:
                 current_geom = geom
         return current_geom
-    
+
     def projectSAndTToXY(self, s, t=0.0):
         geom = self.getGeometryAtS(s)
         return geom.projectSAndTToXY(s, t)
 
+
 @dataclass
 class Elevation:
     """Elevation profile segment (cubic polynomial)."""
+
     s: float
     a: float
     b: float
@@ -648,7 +677,7 @@ class Elevation:
             c=_get_attrib(element, "c", float, 0.0),
             d=_get_attrib(element, "d", float, 0.0),
         )
-    
+
     def computeElevationAtS(self, ds):
         ds = ds - self.s
         return self.a + (self.b * ds) + (self.c * (ds**2)) + (self.d * (ds**3))
@@ -657,6 +686,7 @@ class Elevation:
 @dataclass
 class ElevationProfile:
     """Container for a list of elevation entries."""
+
     elevations: List[Elevation] = field(default_factory=list)
 
     def toXML(self) -> ET.Element:
@@ -670,14 +700,14 @@ class ElevationProfile:
         return cls(
             elevations=[Elevation.fromXML(e) for e in element.findall("elevation")]
         )
-    
+
     def getElevationObjectAtS(self, s):
         current_elevation = None
         for elevation in self.elevations:
             if elevation.s <= s:
                 current_elevation = elevation
         return current_elevation
-    
+
     def computeElevationAtS(self, s):
         elevation = self.getElevationObjectAtS(s)
         return elevation.computeElevationAtS(s)
@@ -686,6 +716,7 @@ class ElevationProfile:
 @dataclass
 class Superelevation:
     """Superelevation entry for lateral profile."""
+
     s: float
     a: float
     b: float
@@ -715,6 +746,7 @@ class Superelevation:
 @dataclass
 class Crossfall:
     """Crossfall entry for lateral profile."""
+
     side: str
     s: float
     a: float
@@ -747,6 +779,7 @@ class Crossfall:
 @dataclass
 class Shape:
     """Defines an arbitrary vertical shape (third order polynomial) in lateral profile."""
+
     s: float
     t: float
     a: float
@@ -774,14 +807,16 @@ class Shape:
             c=_get_attrib(element, "c", float, 0.0),
             d=_get_attrib(element, "d", float, 0.0),
         )
-    
+
     def computeHShape(self, dt: float):
         dt = dt - self.t
-        return self.a + (self.b * dt) + (self.c * (dt ** 2)) + (self.d * (dt ** 3))
+        return self.a + (self.b * dt) + (self.c * (dt**2)) + (self.d * (dt**3))
+
 
 @dataclass
 class LateralProfile:
     """Container for superelevation, crossfall and shape entries."""
+
     superelevations: List[Superelevation] = field(default_factory=list)
     crossfalls: List[Crossfall] = field(default_factory=list)
     shapes: List[Shape] = field(default_factory=list)
@@ -799,18 +834,20 @@ class LateralProfile:
     @classmethod
     def fromXML(cls: Type[T], element: ET.Element) -> T:
         return cls(
-            superelevations=[Superelevation.fromXML(e) for e in element.findall("superelevation")],
+            superelevations=[
+                Superelevation.fromXML(e) for e in element.findall("superelevation")
+            ],
             crossfalls=[Crossfall.fromXML(e) for e in element.findall("crossfall")],
             shapes=[Shape.fromXML(e) for e in element.findall("shape")],
         )
-    
+
     def getShapeAtS(self, s: float):
         shapes = self.shapes
         for shape in shapes:
             if shape.s >= s:
                 return shape
-    
-    # Currently we assume we're using shapes and that there is one shape per portion of the reference line. 
+
+    # Currently we assume we're using shapes and that there is one shape per portion of the reference line.
     # It's a kludge. We'll make it better ;)
     def computeElevationDeltaAtSAndT(self, s: float, t: float):
         shape = self.getShapeAtS(s)
@@ -820,6 +857,7 @@ class LateralProfile:
 @dataclass
 class LaneOffset:
     """Represents a polynomial lateral offset of the lane coordinate system."""
+
     s: float
     a: float
     b: float
@@ -844,14 +882,16 @@ class LaneOffset:
             c=_get_attrib(element, "c", float, 0.0),
             d=_get_attrib(element, "d", float, 0.0),
         )
-    
+
     def calculateOffsetAtOffset(self, ds):
         ds = ds - self.s
         return self.a + (self.b * ds) + (self.c * (ds**2)) + (self.d * (ds**3))
 
+
 @dataclass
 class LaneLink:
     """Maps lanes across road segments within lane context."""
+
     predecessor: List[int] = field(default_factory=list)
     successor: List[int] = field(default_factory=list)
 
@@ -870,14 +910,23 @@ class LaneLink:
 
     @classmethod
     def fromXML(cls: Type[T], element: ET.Element) -> T:
-        preds = [int(p.get("id")) for p in element.findall("predecessor")] if element is not None else []
-        succs = [int(s.get("id")) for s in element.findall("successor")] if element is not None else []
+        preds = (
+            [int(p.get("id")) for p in element.findall("predecessor")]
+            if element is not None
+            else []
+        )
+        succs = (
+            [int(s.get("id")) for s in element.findall("successor")]
+            if element is not None
+            else []
+        )
         return cls(predecessor=preds, successor=succs)
 
 
 @dataclass
 class Width:
     """Defines lane width as a cubic polynomial along its length."""
+
     sOffset: float
     a: float
     b: float
@@ -902,14 +951,16 @@ class Width:
             c=_get_attrib(element, "c", float, 0.0),
             d=_get_attrib(element, "d", float, 0.0),
         )
-    
+
     def calculateWidthAtOffset(self, ds):
         ds = ds - self.sOffset
         return self.a + (self.b * ds) + (self.c * (ds**2)) + (self.d * (ds**3))
 
+
 @dataclass
 class Border:
     """Defines a lane border as a cubic polynomial."""
+
     sOffset: float
     a: float
     b: float
@@ -939,6 +990,7 @@ class Border:
 @dataclass
 class RoadMark:
     """Defines a road marking on a lane boundary."""
+
     sOffset: float
     type: str
     weight: Optional[str] = None
@@ -977,6 +1029,7 @@ class RoadMark:
 @dataclass
 class Material:
     """Specifies a lane surface material."""
+
     sOffset: float
     surface: str
     friction: Optional[float] = None
@@ -1003,6 +1056,7 @@ class Material:
 @dataclass
 class Visibility:
     """Defines lane visibility distances."""
+
     sOffset: float
     forward: Optional[float] = None
     back: Optional[float] = None
@@ -1032,6 +1086,7 @@ class Visibility:
 @dataclass
 class LaneSpeed:
     """Specifies a lane specific speed limit."""
+
     sOffset: float
     max: float
     unit: Optional[str] = None
@@ -1055,6 +1110,7 @@ class LaneSpeed:
 @dataclass
 class Access:
     """Specifies an access restriction for a lane."""
+
     sOffset: float
     rule: str
     restriction: str
@@ -1078,6 +1134,7 @@ class Access:
 @dataclass
 class HeightRecord:
     """Defines a lane height offset (inner and outer) relative to road reference."""
+
     sOffset: float
     inner: float
     outer: float
@@ -1101,6 +1158,7 @@ class HeightRecord:
 @dataclass
 class LaneRule:
     """Free‑text rule for a lane."""
+
     sOffset: float
     value: str
 
@@ -1124,6 +1182,7 @@ class Lane:
     Represents an individual lane (child of left/center/right in a lane section).
     Only a subset of the attributes and child records are implemented here.
     """
+
     id: int
     type: Optional[str] = None
     level: Optional[bool] = None
@@ -1204,22 +1263,23 @@ class Lane:
             heights=heights,
             rules=rules,
         )
-    
+
     def getWidthEntryAtOffset(self, offset: float) -> Width:
         current_width = None
         for width in self.widths:
             if width.sOffset <= offset:
                 current_width = width
         return current_width
-    
+
     def calculateWidthAtOffset(self, offset: float):
         width_entry = self.getWidthEntryAtOffset(offset)
         return width_entry.calculateWidthAtOffset(offset - width_entry.sOffset)
-        
+
 
 @dataclass
 class LaneGroup:
     """Represents a grouping of lanes on a particular side (left, center, right)."""
+
     lanes: List[Lane] = field(default_factory=list)
 
     def toXML(self, tag: str) -> ET.Element:
@@ -1236,6 +1296,7 @@ class LaneGroup:
 @dataclass
 class LaneSection:
     """Represents a ``<laneSection>`` inside the lanes container."""
+
     s: float
     singleSide: Optional[bool] = None
     left: Optional[LaneGroup] = None
@@ -1265,7 +1326,9 @@ class LaneSection:
         center_elem = element.find("center")
         right_elem = element.find("right")
         left_group = LaneGroup.fromXML(left_elem) if left_elem is not None else None
-        center_group = LaneGroup.fromXML(center_elem) if center_elem is not None else None
+        center_group = (
+            LaneGroup.fromXML(center_elem) if center_elem is not None else None
+        )
         right_group = LaneGroup.fromXML(right_elem) if right_elem is not None else None
         return cls(
             s=_get_attrib(element, "s", float, 0.0),
@@ -1279,6 +1342,7 @@ class LaneSection:
 @dataclass
 class Lanes:
     """Container for lane sections and lane offsets."""
+
     laneOffsets: List[LaneOffset] = field(default_factory=list)
     laneSections: List[LaneSection] = field(default_factory=list)
 
@@ -1300,6 +1364,7 @@ class Lanes:
 @dataclass
 class Validity:
     """Defines validity of a signal or object for a lane range."""
+
     fromLane: int
     toLane: int
 
@@ -1320,6 +1385,7 @@ class Validity:
 @dataclass
 class Dependency:
     """Defines a dependency between signals."""
+
     id: str
     type: Optional[str] = None
 
@@ -1343,6 +1409,7 @@ class Signal:
     Represents a traffic signal or sign placed along a road.
     Many optional attributes are supported.
     """
+
     s: float
     t: float
     id: str
@@ -1422,6 +1489,7 @@ class Signal:
 @dataclass
 class SignalReference:
     """Represents a reference to another signal defined on another road."""
+
     s: float
     t: float
     id: str
@@ -1452,6 +1520,7 @@ class SignalReference:
 @dataclass
 class Signals:
     """Container for signals and signal references in a road."""
+
     signals: List[Signal] = field(default_factory=list)
     references: List[SignalReference] = field(default_factory=list)
 
@@ -1467,13 +1536,16 @@ class Signals:
     def fromXML(cls: Type[T], element: ET.Element) -> T:
         return cls(
             signals=[Signal.fromXML(s) for s in element.findall("signal")],
-            references=[SignalReference.fromXML(r) for r in element.findall("signalReference")],
+            references=[
+                SignalReference.fromXML(r) for r in element.findall("signalReference")
+            ],
         )
 
 
 @dataclass
 class Object:
     """Represents a static or dynamic object placed along a road."""
+
     type: str
     subtype: Optional[str] = None
     dynamic: Optional[str] = None
@@ -1543,6 +1615,7 @@ class Object:
 @dataclass
 class ObjectReference:
     """Represents a reference to an object defined on another road."""
+
     s: float
     t: float
     id: str
@@ -1579,6 +1652,7 @@ class ObjectReference:
 @dataclass
 class Objects:
     """Container for objects and object references on a road."""
+
     objects: List[Object] = field(default_factory=list)
     references: List[ObjectReference] = field(default_factory=list)
 
@@ -1594,13 +1668,16 @@ class Objects:
     def fromXML(cls: Type[T], element: ET.Element) -> T:
         return cls(
             objects=[Object.fromXML(o) for o in element.findall("object")],
-            references=[ObjectReference.fromXML(r) for r in element.findall("objectReference")],
+            references=[
+                ObjectReference.fromXML(r) for r in element.findall("objectReference")
+            ],
         )
 
 
 @dataclass
 class LaneLinkJunction:
     """Represents a lane to lane mapping inside a junction connection."""
+
     fromId: int
     toId: int
 
@@ -1621,6 +1698,7 @@ class LaneLinkJunction:
 @dataclass
 class Connection:
     """Represents a junction connection element."""
+
     id: str
     incomingRoad: Optional[str] = None
     connectingRoad: Optional[str] = None
@@ -1652,13 +1730,19 @@ class Connection:
 
     @classmethod
     def fromXML(cls: Type[T], element: ET.Element) -> T:
-        lane_links = [LaneLinkJunction.fromXML(ll) for ll in element.findall("laneLink")]
+        lane_links = [
+            LaneLinkJunction.fromXML(ll) for ll in element.findall("laneLink")
+        ]
         pred_elem = element.find("predecessor")
         succ_elem = element.find("successor")
-        pred = PredecessorSuccessor.fromXML(pred_elem) if pred_elem is not None else None
+        pred = (
+            PredecessorSuccessor.fromXML(pred_elem) if pred_elem is not None else None
+        )
         if pred is not None:
             pred.tag = "predecessor"
-        succ = PredecessorSuccessor.fromXML(succ_elem) if succ_elem is not None else None
+        succ = (
+            PredecessorSuccessor.fromXML(succ_elem) if succ_elem is not None else None
+        )
         if succ is not None:
             succ.tag = "successor"
         return cls(
@@ -1676,11 +1760,12 @@ class Connection:
 @dataclass
 class Junction:
     """Defines an intersection of roads."""
+
     id: str
     name: Optional[str] = None
     type: Optional[str] = None
     connections: List[Connection] = field(default_factory=list)
-    controllers: List['Controller'] = field(default_factory=list)
+    controllers: List["Controller"] = field(default_factory=list)
 
     def toXML(self) -> ET.Element:
         elem = ET.Element("junction")
@@ -1709,6 +1794,7 @@ class Junction:
 @dataclass
 class Control:
     """Links a controller to a signal."""
+
     signalId: str
     type: Optional[str] = None
 
@@ -1729,6 +1815,7 @@ class Control:
 @dataclass
 class Controller:
     """Defines a group of signals that operate together."""
+
     id: str
     name: Optional[str] = None
     sequence: Optional[int] = None
@@ -1756,6 +1843,7 @@ class Controller:
 @dataclass
 class Road:
     """Defines a single road with its geometry, lanes, signals, objects and type records."""
+
     id: str
     length: float
     name: Optional[str] = None
@@ -1810,7 +1898,9 @@ class Road:
         type_elems = element.findall("type")
         types = [RoadType.fromXML(t) for t in type_elems]
         plan_view_elem = element.find("planView")
-        plan_view = PlanView.fromXML(plan_view_elem) if plan_view_elem is not None else None
+        plan_view = (
+            PlanView.fromXML(plan_view_elem) if plan_view_elem is not None else None
+        )
         elev_elem = element.find("elevationProfile")
         elev = ElevationProfile.fromXML(elev_elem) if elev_elem is not None else None
         lat_elem = element.find("lateralProfile")
@@ -1836,14 +1926,14 @@ class Road:
             signals=signals,
             objects=objects,
         )
-    
+
     def projectSAndTToXY(self, s: float, t: float = 0.0):
         return self.planView.projectSAndTToXY(s, t)
-    
+
     # No superelevation or crossfall for now
     def computeElevationAtSAndT(self, s: float, t: float):
         return self.elevationProfile.computeElevationAtS(s)
-    
+
     def laneSectionAndOffsetAt(self, s):
         section = None
         offset = None
@@ -1854,10 +1944,10 @@ class Road:
             if current_offset.s <= s:
                 offset = current_offset
         return section, offset
-    
+
     def sampleReferenceLine(self, resolution):
         return self.planView.sampleReferenceLine(resolution)
-    
+
     # For these two functions, we only want lanes on the same side of the reference line
     def getLanesLeftOfLane(self, lane: Lane, section: LaneSection):
         lanes = {}
@@ -1869,9 +1959,9 @@ class Road:
         for current_lane in lanes_to_review:
             if current_lane.id > lane.id:
                 lanes[current_lane.id] = lane
-        
+
         return lanes
-    
+
     def getLanesRightOfLane(self, lane: Lane, section: LaneSection):
         lanes = {}
         lanes_to_review = None
@@ -1882,42 +1972,57 @@ class Road:
         for current_lane in lanes_to_review:
             if current_lane.id < lane.id:
                 lanes[current_lane.id] = lane
-        
+
         return lanes
-    
-    def getLaneBoundFromReferenceLine(self, s: float, lane: Lane, section: LaneSection, lane_offset: LaneOffset):
+
+    def getLaneBoundFromReferenceLine(
+        self, s: float, lane: Lane, section: LaneSection, lane_offset: LaneOffset
+    ):
         offset_at_s = lane_offset.calculateOffsetAtOffset(s)
         lt = offset_at_s
         if lane.id > 0:
             lanes_to_parse = self.getLanesRightOfLane(lane, section)
             for current_lane_id in lanes_to_parse:
                 current_lane = lanes_to_parse[current_lane_id]
-                current_lane_width_offset = current_lane.calculateWidthAtOffset(s - section.s)
+                current_lane_width_offset = current_lane.calculateWidthAtOffset(
+                    s - section.s
+                )
                 lt += current_lane_width_offset
             lt += lane.calculateWidthAtOffset(s - section.s)
         else:
             lanes_to_parse = self.getLanesLeftOfLane(lane, section)
             for current_lane_id in lanes_to_parse:
                 current_lane = lanes_to_parse[current_lane_id]
-                current_lane_width_offset = current_lane.calculateWidthAtOffset(s - section.s)
+                current_lane_width_offset = current_lane.calculateWidthAtOffset(
+                    s - section.s
+                )
                 lt -= current_lane_width_offset
-                
+
         rt = lt - lane.calculateWidthAtOffset(s - section.s)
         return lt, rt
-    
+
     def generateTBoundsAtS(self, s: float):
         total_lanes, lane_section, lane_offset = self.getLanes(s)
-        max_t = float('-inf')
-        min_t = float('inf')
+        max_t = float("-inf")
+        min_t = float("inf")
         for lane in total_lanes:
-            lt, rt = self.getLaneBoundFromReferenceLine(s, lane, lane_section, lane_offset)
+            lt, rt = self.getLaneBoundFromReferenceLine(
+                s, lane, lane_section, lane_offset
+            )
             if lt > max_t:
                 max_t = lt
             if rt < min_t:
                 min_t = rt
         return max_t, min_t
-    
-    def computeLaneVertices(self, s: float, thickness: float, lane: Lane, section: LaneSection, lane_offset: LaneOffset):
+
+    def computeLaneVertices(
+        self,
+        s: float,
+        thickness: float,
+        lane: Lane,
+        section: LaneSection,
+        lane_offset: LaneOffset,
+    ):
         lt, rt = self.getLaneBoundFromReferenceLine(s, lane, section, lane_offset)
         elevation = self.elevationProfile.computeElevationAtS(s)
         lx, ly = self.planView.projectSAndTToXY(s, lt)
@@ -1927,31 +2032,47 @@ class Road:
         bottom_left = [lx, ly, elevation - (thickness / 2.0)]
         bottom_right = [rx, ry, elevation - (thickness / 2.0)]
         return [top_left, top_right, bottom_left, bottom_right]
-    
+
     def getLanes(self, s: float):
         lane_section, lane_offset = self.laneSectionAndOffsetAt(s)
-        left_lanes, center_lane, right_lanes = lane_section.left.lanes if lane_section.left is not None else [], lane_section.center.lanes, lane_section.right.lanes if lane_section.right is not None else []
+        left_lanes, center_lane, right_lanes = (
+            lane_section.left.lanes if lane_section.left is not None else [],
+            lane_section.center.lanes,
+            lane_section.right.lanes if lane_section.right is not None else [],
+        )
         total_lanes = []
         for lane in left_lanes:
             total_lanes.append(lane)
         for lane in right_lanes:
             total_lanes.append(lane)
         return total_lanes, lane_section, lane_offset
-        
+
     def computeLanesVertices(self, s: float, thickness: float):
         total_lanes, lane_section, lane_offset = self.getLanes(s)
         lanes_vertices = {}
         for lane in total_lanes:
-            lanes_vertices[lane.id] = self.computeLaneVertices(s, thickness, lane, lane_section, lane_offset)
+            lanes_vertices[lane.id] = self.computeLaneVertices(
+                s, thickness, lane, lane_section, lane_offset
+            )
         return lanes_vertices
-    
+
     # Fetches the bounding vertices for each lane and currently just returns the outermost lane and the innermost lane's boundaries
-    def generateRoadVerticesAtS(self, s: float, thickness: float = 1.0, opendrive_origin: list[float] = None):
+    def generateRoadVerticesAtS(
+        self, s: float, thickness: float = 1.0, opendrive_origin: list[float] = None
+    ):
         lane_vertices = self.computeLanesVertices(s, thickness)
         lane_vertices_keys = list(lane_vertices.keys())
         lane_vertices_keys.sort(reverse=True)
-        left_most_lane_vertices, right_most_lane_vertices = lane_vertices[lane_vertices_keys[0]], lane_vertices[lane_vertices_keys[-1]]
-        vertices = [left_most_lane_vertices[0], right_most_lane_vertices[1], left_most_lane_vertices[2], right_most_lane_vertices[3]]
+        left_most_lane_vertices, right_most_lane_vertices = (
+            lane_vertices[lane_vertices_keys[0]],
+            lane_vertices[lane_vertices_keys[-1]],
+        )
+        vertices = [
+            left_most_lane_vertices[0],
+            right_most_lane_vertices[1],
+            left_most_lane_vertices[2],
+            right_most_lane_vertices[3],
+        ]
         if opendrive_origin is not None:
             for i in range(len(vertices)):
                 vertices[i][0] -= opendrive_origin[0]
@@ -1959,12 +2080,14 @@ class Road:
                 vertices[i][2] -= opendrive_origin[2]
         return vertices
 
+
 @dataclass
 class OpenDRIVE:
     """
     Top level container for an OpenDRIVE map.  Contains a header, roads,
     junctions and controllers.
     """
+
     header: Header
     roads: Dict[Road] = field(default_factory=dict)
     junctions: List[Junction] = field(default_factory=list)
@@ -1999,14 +2122,16 @@ class OpenDRIVE:
             roads[road.id] = road
         junctions = [Junction.fromXML(j) for j in element.findall("junction")]
         controllers = [Controller.fromXML(c) for c in element.findall("controller")]
-        return cls(header=header, roads=roads, junctions=junctions, controllers=controllers)
-    
+        return cls(
+            header=header, roads=roads, junctions=junctions, controllers=controllers
+        )
+
     @classmethod
     def loadFile(cls: Type[T], file_path: str) -> T:
         xml_data = ET.parse(file_path)
         root_xml = xml_data.getroot()
         return cls.fromXML(root_xml)
-    
+
     def writeFile(self, file_path: str):
         data = self.toXML()
         _indent(data)
