@@ -3,7 +3,6 @@ from shapely.geometry import Polygon
 from shapely.affinity import scale
 from pyproj import Transformer
 import json
-import pyproj
 
 transformer = Transformer.from_crs("EPSG:4326", "EPSG:6576", always_xy=True)
 

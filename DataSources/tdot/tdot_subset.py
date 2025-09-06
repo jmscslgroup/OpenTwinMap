@@ -1,7 +1,6 @@
 import json
 import os
 import subprocess
-import laspy
 import numpy as np
 import joblib
 import shutil
@@ -685,7 +684,6 @@ class TDOTSubset:
         tile_list = subset["tiles"]
         print(tile_list)
         
-        """
         parallel_result = joblib.Parallel(n_jobs=2, backend="multiprocessing")(joblib.delayed(downloadOSM)(osm_folder, metadata, tile) for tile in tile_list)
 
         commands = ["osmium", "merge"]
@@ -695,9 +693,7 @@ class TDOTSubset:
             commands.append(osm_path)
         commands.append("-o")
         commands.append(merged_osm_original)
-        subprocess.run(commands, shell=False)
-        """
-        
+        subprocess.run(commands, shell=False)        
 
         min_long, min_lat, max_long, max_lat = getFinalOSMBound(metadata, tile_list)
         tree = ET.parse(merged_osm_original)

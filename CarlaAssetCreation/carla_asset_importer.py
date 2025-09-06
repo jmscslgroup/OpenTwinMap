@@ -24,10 +24,10 @@ def _importFbxToUnrealMethodGeneral(ue4_root, project_path, dataset_path, asset_
 class CarlaAssetImporter:
     cooked_path = None
     dataset = None
-    ue4_root = "/home/richarwa/SecondSSD/UnrealEngine_4.26/"
-    project_path = "/home/richarwa/SecondSSD/carla/Unreal/CarlaUE4/CarlaUE4.uproject"
 
-    def __init__(self, cooked_path):
+    def __init__(self, ue4_root, carla_path, cooked_path):
+        self.ue4_root = ue4_root
+        self.project_path = os.path.join(carla_path, "Unreal/CarlaUE4/CarlaUE4.uproject")
         self.cooked_path = cooked_path
         self.dataset = CarlaAssetDataset(self.cooked_path, initialized=True)
 
