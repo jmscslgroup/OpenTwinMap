@@ -2,6 +2,11 @@ import json
 
 
 class TDOTUtils:
+    feet_to_meters = 0.3048
+    meters_to_feet = 3.28084
+    dem_cell_size = 2.0
+    dem_cell_delta = 1.0
+
     def __init__(self):
         pass
 
@@ -19,6 +24,7 @@ class TDOTUtils:
             for i in range(total_entries):
                 result = result + TDOTUtils.getCoordinatePairs(coordinates[i])
             return result
+        return []
 
     @staticmethod
     def getSouthWestCoordinate(coords):

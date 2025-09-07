@@ -6,15 +6,18 @@ from joblib import Parallel, delayed
 
 
 class TDOTMetadata:
-    GEOJSON_path = "2022_Davidson_County_QL1_Tile_Index.geojson"
-    DEM_path = "DEM/Davidson_County_2022_QL1_DEM/Davidson_County_2022_QL1_DEM_tiles"
-    LAZ_path = (
+    GEOJSON_path: str = "2022_Davidson_County_QL1_Tile_Index.geojson"
+    DEM_path: str = (
+        "DEM/Davidson_County_2022_QL1_DEM/Davidson_County_2022_QL1_DEM_tiles"
+    )
+    LAZ_path: str = (
         "PointCloud/Davidson_County_TN_2022_QL1_laz/Davidson_County_TN_2022_QL1_laz"
     )
-    subset_json_path = "./compile_subset.json"
-    original_data_path = None
+    subset_json_path: str = "./compile_subset.json"
+    original_data_path: str = ""
     geojson_data = None
-    tile_list = None
+    all_tiles: list[str] = []
+    subset_tiles: list[str] = []
 
     def __init__(self, original_data_path):
         self.original_data_path = original_data_path
@@ -24,8 +27,9 @@ class TDOTMetadata:
         self.subset_json_path = os.path.join(
             os.path.dirname(__file__), self.subset_json_path
         )
-        self.get_geojson_data()
-        self.get_all_tiles()
+        self.geojson_data = self.getGEOJSONData()
+        self.all_tiles = self.getAllTiles()
+        self.subset_tiles = self.getTileList()
 
     @staticmethod
     def getBoundingBox(metadata_entry):
@@ -41,6 +45,18 @@ class TDOTMetadata:
             raise Exception(str(metadata_entry["GEOJSON"]["coordinates"]))
 
     @staticmethod
+    def getFinalOSMBound(metadata, tiles):
+        coords = []
+        for tile in tiles:
+            tile = str(tile)
+            coords += TDOTMetadata.getEntryCoords(metadata["tiles"][tile])
+        southwest = TDOTUtils.getSouthWestCoordinate(coords)
+        northeast = TDOTUtils.getNorthEastCoordinate(coords)
+        print("SW ", southwest)
+        print("NE ", northeast)
+        return [southwest[0], southwest[1], northeast[0], northeast[1]]
+
+    @staticmethod
     def getEntryCoords(metadata_entry):
         try:
             geojson_coordinates = TDOTUtils.getCoordinatePairs(
@@ -51,9 +67,8 @@ class TDOTMetadata:
             print(metadata_entry["GEOJSON"]["coordinates"])
             raise Exception(str(metadata_entry["GEOJSON"]["coordinates"]))
 
-    @staticmethod
-    def get_geojson_data(metadata):
-        with open(metadata.GEOJSON_path, "r") as f:
+    def getGEOJSONData(self):
+        with open(self.GEOJSON_path, "r") as f:
             data = json.load(f)
         result = {}
         for entry in data["features"]:
@@ -61,11 +76,10 @@ class TDOTMetadata:
             result[name] = entry["geometry"]
         return result
 
-    @staticmethod
-    def get_all_tiles(metadata):
+    def getAllTiles(self):
         return [
             os.path.splitext(entry)[0]
-            for entry in os.listdir(metadata.DEM_path)
+            for entry in os.listdir(self.DEM_path)
             if (".tif" == os.path.splitext(entry)[1])
             and ("." not in os.path.splitext(entry)[0])
         ]
@@ -127,77 +141,118 @@ class TDOTMetadata:
 
         return result
 
-    def compileSourceMetadata(self, tile_list):
+    def getTileList(self):
+        return TDOTUtils.loadJson(self.subset_json_path)["tiles"]
+
+    def compileSourceMetadata(self):
         json_result = {}
         parallel_result = Parallel(n_jobs=64, backend="multiprocessing")(
-            delayed(TDOTMetadata.fetchMetaData)(self, tile) for tile in tile_list
+            delayed(TDOTMetadata.fetchMetaData)(self, tile)
+            for tile in self.subset_tiles
         )
-        for i in range(len(tile_list)):
-            json_result[tile_list[i]] = parallel_result[i]
+        for i in range(len(self.subset_tiles)):
+            json_result[self.subset_tiles[i]] = parallel_result[i]
         json_result["selected_origin"] = "148110"
         return json_result
 
-    def compileMetadata(self, tile_list):
-        cell_size = 2.0
-        cell_delta = cell_size / 2.0
-        metadata = cls.loadJson(metadata_path)
-        subset = cls.loadJson(subset_path)
-        metadata_new_path = os.path.join(root_folder, "metadata.json")
-        subset_tiles = subset["tiles"]
-        min_long, min_lat, max_long, max_lat = getFinalOSMBound(metadata, subset_tiles)
-
+    def compileMetadata(self):
+        source_metadata = self.compileSourceMetadata()
         result_metadata = {}
         result_metadata["tiles"] = {}
-        for tile in subset_tiles:
+        for tile in self.subset_tiles:
             tile = str(tile)
             tile_data = {}
             tile_data["DEM"] = {}
+            tile_data["DEM"]["original_tif_path"] = source_metadata[tile]["DEM"][
+                "tif_path"
+            ]
+            tile_data["DEM"]["original_asc_path"] = source_metadata[tile]["DEM"][
+                "asc_path"
+            ]
+            tile_data["DEM"]["original_bin_path"] = source_metadata[tile]["DEM"][
+                "bin_path"
+            ]
+            tile_data["DEM"]["original_csv_path"] = source_metadata[tile]["DEM"][
+                "csv_path"
+            ]
             tile_data["DEM"]["path"] = os.path.join("dem", tile + ".csv")
             tile_data["DEM"]["x"] = {
-                "min": (metadata[tile]["DEM"]["x"]["min"] - cell_delta)
-                * cls.feet_to_meters,
-                "max": (metadata[tile]["DEM"]["x"]["max"] + cell_delta)
-                * cls.feet_to_meters,
+                "min": (
+                    source_metadata[tile]["DEM"]["x"]["min"] - TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
+                "max": (
+                    source_metadata[tile]["DEM"]["x"]["max"] + TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
             }
             tile_data["DEM"]["y"] = {
-                "min": (metadata[tile]["DEM"]["y"]["min"] - cell_delta)
-                * cls.feet_to_meters,
-                "max": (metadata[tile]["DEM"]["y"]["max"] + cell_delta)
-                * cls.feet_to_meters,
+                "min": (
+                    source_metadata[tile]["DEM"]["y"]["min"] - TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
+                "max": (
+                    source_metadata[tile]["DEM"]["y"]["max"] + TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
             }
             tile_data["DEM"]["z"] = {
-                "min": (metadata[tile]["DEM"]["z"]["min"] - cell_delta)
-                * cls.feet_to_meters,
-                "max": (metadata[tile]["DEM"]["z"]["max"] + cell_delta)
-                * cls.feet_to_meters,
+                "min": (
+                    source_metadata[tile]["DEM"]["z"]["min"] - TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
+                "max": (
+                    source_metadata[tile]["DEM"]["z"]["max"] + TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
             }
             tile_data["LAZ"] = {}
+            tile_data["LAZ"]["original_laz_path"] = source_metadata[tile]["LAZ"][
+                "laz_path"
+            ]
+            tile_data["LAZ"]["original_las_path"] = source_metadata[tile]["LAZ"][
+                "las_path"
+            ]
+            tile_data["LAZ"]["original_pcd_path"] = source_metadata[tile]["LAZ"][
+                "pcd_path"
+            ]
             tile_data["LAZ"]["path"] = os.path.join("pcd", tile + ".pcd")
             tile_data["LAZ"]["bounds"] = {}
             tile_data["LAZ"]["bounds"]["x"] = {
-                "min": (metadata[tile]["DEM"]["x"]["min"] - cell_delta)
-                * cls.feet_to_meters,
-                "max": (metadata[tile]["DEM"]["x"]["max"] + cell_delta)
-                * cls.feet_to_meters,
+                "min": (
+                    source_metadata[tile]["DEM"]["x"]["min"] - TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
+                "max": (
+                    source_metadata[tile]["DEM"]["x"]["max"] + TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
             }
             tile_data["LAZ"]["bounds"]["y"] = {
-                "min": (metadata[tile]["DEM"]["y"]["min"] - cell_delta)
-                * cls.feet_to_meters,
-                "max": (metadata[tile]["DEM"]["y"]["max"] + cell_delta)
-                * cls.feet_to_meters,
+                "min": (
+                    source_metadata[tile]["DEM"]["y"]["min"] - TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
+                "max": (
+                    source_metadata[tile]["DEM"]["y"]["max"] + TDOTUtils.dem_cell_delta
+                )
+                * TDOTUtils.feet_to_meters,
             }
-            tile_data["GEOJSON"] = metadata[tile]["GEOJSON"]
-            tile_data["GEOJSON"]["coordinates"] = getCoordinatePairs(
+            tile_data["GEOJSON"] = source_metadata[tile]["GEOJSON"]
+            tile_data["GEOJSON"]["coordinates"] = TDOTUtils.getCoordinatePairs(
                 tile_data["GEOJSON"]["coordinates"]
             )
             tile_data["GEOJSON"]["bounds"] = {}
-            tile_data["GEOJSON"]["bounds"]["min"] = getSouthWestCoordinate(
+            tile_data["GEOJSON"]["bounds"]["min"] = TDOTUtils.getSouthWestCoordinate(
                 tile_data["GEOJSON"]["coordinates"]
             )
-            tile_data["GEOJSON"]["bounds"]["max"] = getNorthEastCoordinate(
+            tile_data["GEOJSON"]["bounds"]["max"] = TDOTUtils.getNorthEastCoordinate(
                 tile_data["GEOJSON"]["coordinates"]
             )
             result_metadata["tiles"][tile] = tile_data
+        min_long, min_lat, max_long, max_lat = TDOTMetadata.getFinalOSMBound(
+            result_metadata, self.subset_tiles
+        )
         result_metadata["bounds"] = {}
         result_metadata["bounds"]["min_long"] = min_long
         result_metadata["bounds"]["min_lat"] = min_lat
@@ -231,3 +286,4 @@ class TDOTMetadata:
         result_metadata["bounds"]["max_meters_x"] = max_meters_x
         result_metadata["bounds"]["min_meters_y"] = min_meters_y
         result_metadata["bounds"]["max_meters_y"] = max_meters_y
+        return result_metadata
