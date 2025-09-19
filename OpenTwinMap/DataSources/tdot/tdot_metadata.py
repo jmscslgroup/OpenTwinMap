@@ -16,8 +16,8 @@ class TDOTMetadata:
     subset_json_path: str = "./compile_subset.json"
     original_data_path: str = ""
     geojson_data = None
-    all_tiles: list[str] = []
-    subset_tiles: list[str] = []
+    all_tiles = []
+    subset_tiles = []
 
     def __init__(self, original_data_path):
         self.original_data_path = original_data_path
@@ -126,9 +126,9 @@ class TDOTMetadata:
 
     @staticmethod
     def fetchGEOJSONData(metadata, tile):
-        if tile in metadata.GEOJSON_data:
+        if tile in metadata.geojson_data:
             print("found tile!")
-            return metadata.GEOJSON_data[tile]
+            return metadata.geojson_data[tile]
         print("Failed to find tile!")
         return None
 

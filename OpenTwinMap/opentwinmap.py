@@ -1,8 +1,9 @@
-from DataSources.tdot.tdot_subset import TDOTSubset
-from OpenDrive import osm_to_opendrive
-from CarlaAssetCreation.carla_asset_creator import CarlaAssetCreator
-from CarlaAssetCreation.carla_asset_importer import CarlaAssetImporter
-from OSMLidarCorrection.correct_osm_ways import OSMLidarCorrection
+from .DataSources.tdot.tdot_subset import TDOTSubset
+from .DataSources.tdot.tdot_creator import TDOTSubsetCreator
+from .OpenDrive import osm_to_opendrive
+from .CarlaAssetCreation.carla_asset_creator import CarlaAssetCreator
+from .CarlaAssetCreation.carla_asset_importer import CarlaAssetImporter
+from .OSMLidarCorrection.correct_osm_ways import OSMLidarCorrection
 
 
 class OpenTwinMap:
@@ -17,7 +18,12 @@ class OpenTwinMap:
         pass
 
     def importSourceData(self):
-        pass
+        if self.dataset_type == "tdot":
+            creator = TDOTSubsetCreator(self.dataset_path, self.loaded_dataset_path)
+            creator.compileMetadata()
+            creator.compileDEMSubset()
+            creator.compileLidarSubset()
+            creator.compileOSMSubset()
 
     def performOSMLidarTuning(self):
         OSMLidarCorrection.performOSMLidarTuning(self.loaded_dataset_path, self.dataset_type)

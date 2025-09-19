@@ -1,5 +1,6 @@
 import pyproj
 import networkx as nx
+import osmium
 
 meters_to_feet = 3.28084
 feet_to_meters = 1.0 / meters_to_feet

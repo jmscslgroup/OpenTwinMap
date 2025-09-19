@@ -8,11 +8,8 @@ import subprocess
 import shapely.geometry
 import xml.etree.ElementTree as ET
 import concurrent.futures
-import sys
-
-sys.path.append(".")
 from .carla_asset_dataset import CarlaAssetDataset
-from OpenDrive.opendrive import OpenDRIVE
+from ..OpenDrive.opendrive import OpenDRIVE
 
 
 def _generateTerrainTileMethod(

@@ -14,7 +14,7 @@ import math
 import hashlib
 import time
 
-from DEM_python import DEM
+from ...DEM_python import DEM
 from .tdot_utils import TDOTUtils
 
 import xml.etree.ElementTree as ET

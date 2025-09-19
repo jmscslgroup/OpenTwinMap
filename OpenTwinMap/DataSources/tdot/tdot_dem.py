@@ -38,7 +38,7 @@ class TDOTDEMCreator:
     def compileDEMSubset(self, metadata, subset):
         subset_dem_tif_files = [
             metadata["tiles"][str(entry)]["DEM"]["original_tif_path"]
-            for entry in subset["tiles"]
+            for entry in subset
         ]
 
         subset_dem_csv_files = [
@@ -46,7 +46,7 @@ class TDOTDEMCreator:
                 metadata["tiles"][str(entry)]["DEM"]["original_csv_path"],
                 metadata["tiles"][str(entry)]["DEM"]["path"],
             )
-            for entry in subset["tiles"]
+            for entry in subset
         ]
         print("Convert tif files...")
         result = list(

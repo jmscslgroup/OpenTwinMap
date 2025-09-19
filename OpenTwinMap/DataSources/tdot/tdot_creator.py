@@ -48,4 +48,4 @@ class TDOTSubsetCreator:
     def compileMetadata(self):
         self.metadata_obj = TDOTMetadata(self.original_data_path)
         self.metadata_json = self.metadata_obj.compileMetadata()
-        TDOTUtils.writeJson(self.metadata_path, self.metadata_obj)
+        TDOTUtils.writeJson(self.metadata_path, self.metadata_json)

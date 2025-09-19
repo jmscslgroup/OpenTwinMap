@@ -1,4 +1,4 @@
-from DataSources.tdot.tdot_subset import TDOTSubset
+from .tdot_subset import TDOTSubset
 import open3d
 
 map_data = TDOTSubset("./SubsetSelection/")

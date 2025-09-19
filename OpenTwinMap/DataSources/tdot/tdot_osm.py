@@ -4,7 +4,7 @@ import os
 import subprocess
 import pyproj
 import shapely
-import nx
+import networkx as nx
 import joblib
 import xml.etree.ElementTree as ET
 from .tdot_metadata import TDOTMetadata
@@ -155,7 +155,7 @@ class TDOTOSMCreator:
     def __init__(self, root_folder):
         self.root_folder = root_folder
         self.osm_folder = os.path.join(root_folder, "osm/")
-        os.makedirs(osm_folder, exist_ok=True)
+        os.makedirs(self.osm_folder, exist_ok=True)
 
     @staticmethod
     def downloadOSM(osm_folder, metadata, tile):
