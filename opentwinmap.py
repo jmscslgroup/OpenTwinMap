@@ -2,6 +2,7 @@ from DataSources.tdot.tdot_subset import TDOTSubset
 from OpenDrive import osm_to_opendrive
 from CarlaAssetCreation.carla_asset_creator import CarlaAssetCreator
 from CarlaAssetCreation.carla_asset_importer import CarlaAssetImporter
+from OSMLidarCorrection.correct_osm_ways import OSMLidarCorrection
 
 
 class OpenTwinMap:
@@ -19,7 +20,7 @@ class OpenTwinMap:
         pass
 
     def performOSMLidarTuning(self):
-        pass
+        OSMLidarCorrection.performOSMLidarTuning(self.loaded_dataset_path, self.dataset_type)
 
     def convertOSMToOpenDrive(self):
         map_data = TDOTSubset(self.loaded_dataset_path)
