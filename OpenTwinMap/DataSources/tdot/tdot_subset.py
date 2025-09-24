@@ -68,10 +68,9 @@ class TDOTSubset:
             self.meters_index.insert(k_int, meters_bbox)
             self.coords_index.insert(k_int, coords_bbox)
 
-    def __init__(self, root_folder, original_data_path, osm_path="osm_subset.osm"):
+    def __init__(self, root_folder, osm_path="osm_subset.osm"):
         self.osm_path = osm_path
         self.root_folder = root_folder
-        self.original_data_path = original_data_path
         self.metadata_json = TDOTUtils.loadJson(self.getMetadataPath())
         self.proj = pyproj.Transformer.from_crs(
             "EPSG:4326", "EPSG:6576", always_xy=True

@@ -55,9 +55,9 @@ class OpenTwinMap:
         converter.convertRoadsFromFbxToUnreal()
 
     def runPipeline(self):
-        self.importSourceData()
-        self.performOSMLidarTuning()
-        self.convertOSMToOpenDrive()
+        #self.importSourceData()
+        #self.performOSMLidarTuning()
+        #self.convertOSMToOpenDrive()
         self.create3DAssets()
         self.export3DAssetsToCARLA()
 
