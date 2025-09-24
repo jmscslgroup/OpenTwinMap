@@ -130,12 +130,12 @@ class TDOTSubset:
             self.metadata_json["tiles"][tile]["GEOJSON"]["bounds"]["min"]
             for tile in all_tiles
         ]
-        southwest_bound = getSouthWestCoordinate(southwest_coordinates)
+        southwest_bound = TDOTUtils.getSouthWestCoordinate(southwest_coordinates)
         northeast_coordinates = [
             self.metadata_json["tiles"][tile]["GEOJSON"]["bounds"]["max"]
             for tile in all_tiles
         ]
-        northeast_bound = getNorthEastCoordinate(northeast_coordinates)
+        northeast_bound = TDOTUtils.getNorthEastCoordinate(northeast_coordinates)
         return np.array(
             [
                 southwest_bound[0],

@@ -47,5 +47,6 @@ class TDOTSubsetCreator:
 
     def compileMetadata(self):
         self.metadata_obj = TDOTMetadata(self.original_data_path)
+        TDOTDEMCreator.convertTIFs(self.metadata_obj.DEM_path, self.metadata_obj.subset_tiles)
         self.metadata_json = self.metadata_obj.compileMetadata()
         TDOTUtils.writeJson(self.metadata_path, self.metadata_json)

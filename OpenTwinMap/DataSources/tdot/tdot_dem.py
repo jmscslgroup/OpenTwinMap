@@ -30,22 +30,9 @@ class TDOTDEMCreator:
         subprocess.run(commands, shell=False)
 
     @staticmethod
-    def copyDEM(dem_original_path, root_folder, new_dem_path):
-        new_pcd_path = os.path.join(root_folder, new_dem_path)
-        # dem_pcd_subset_path = Path(self.pcd_folder) / dem_pcd_original_path.name
-        shutil.copy(dem_original_path, new_pcd_path)
-
-    def compileDEMSubset(self, metadata, subset):
+    def convertTIFs(dem_folder, subset):
         subset_dem_tif_files = [
-            metadata["tiles"][str(entry)]["DEM"]["original_tif_path"]
-            for entry in subset
-        ]
-
-        subset_dem_csv_files = [
-            (
-                metadata["tiles"][str(entry)]["DEM"]["original_csv_path"],
-                metadata["tiles"][str(entry)]["DEM"]["path"],
-            )
+            os.path.join(dem_folder, entry+".tif")
             for entry in subset
         ]
         print("Convert tif files...")
@@ -59,6 +46,20 @@ class TDOTDEMCreator:
             )
         )
 
+    @staticmethod
+    def copyDEM(dem_original_path, root_folder, new_dem_path):
+        new_pcd_path = os.path.join(root_folder, new_dem_path)
+        # dem_pcd_subset_path = Path(self.pcd_folder) / dem_pcd_original_path.name
+        shutil.copy(dem_original_path, new_pcd_path)
+
+    def copyDEMs(self, metadata, subset):
+        subset_dem_csv_files = [
+            (
+                metadata["tiles"][str(entry)]["DEM"]["original_csv_path"],
+                metadata["tiles"][str(entry)]["DEM"]["path"],
+            )
+            for entry in subset
+        ]
         print("Copying dem files...")
         result = list(
             tqdm(
@@ -71,3 +72,6 @@ class TDOTDEMCreator:
                 total=len(subset_dem_csv_files),
             )
         )
+
+    def compileDEMSubset(self, metadata, subset):
+        self.copyDEMs(metadata, subset)

@@ -90,8 +90,8 @@ class TDOTMetadata:
         asc_path = os.path.join(metadata.DEM_path, tile + ".asc")
         bin_path = os.path.join(metadata.DEM_path, tile + ".bin")
         csv_path = os.path.join(metadata.DEM_path, tile + ".csv")
-        asc_data_loaded = pandas.read_csv(
-            asc_path, names=["x", "y", "z"], sep=" ", skiprows=6
+        csv_data_loaded = pandas.read_csv(
+            csv_path, names=["x", "y", "z"], sep=" ", skiprows=0
         )
         dem_metadata = {}
         dem_metadata["path"] = tif_path
@@ -102,12 +102,12 @@ class TDOTMetadata:
         dem_metadata["x"] = {}
         dem_metadata["y"] = {}
         dem_metadata["z"] = {}
-        dem_metadata["x"]["min"] = asc_data_loaded["x"].min()
-        dem_metadata["x"]["max"] = asc_data_loaded["x"].max()
-        dem_metadata["y"]["min"] = asc_data_loaded["y"].min()
-        dem_metadata["y"]["max"] = asc_data_loaded["y"].max()
-        dem_metadata["z"]["min"] = asc_data_loaded["z"].min()
-        dem_metadata["z"]["max"] = asc_data_loaded["z"].max()
+        dem_metadata["x"]["min"] = csv_data_loaded["x"].min()
+        dem_metadata["x"]["max"] = csv_data_loaded["x"].max()
+        dem_metadata["y"]["min"] = csv_data_loaded["y"].min()
+        dem_metadata["y"]["max"] = csv_data_loaded["y"].max()
+        dem_metadata["z"]["min"] = csv_data_loaded["z"].min()
+        dem_metadata["z"]["max"] = csv_data_loaded["z"].max()
 
         return dem_metadata
 
@@ -286,4 +286,5 @@ class TDOTMetadata:
         result_metadata["bounds"]["max_meters_x"] = max_meters_x
         result_metadata["bounds"]["min_meters_y"] = min_meters_y
         result_metadata["bounds"]["max_meters_y"] = max_meters_y
+        result_metadata["source_metadata"] = source_metadata
         return result_metadata

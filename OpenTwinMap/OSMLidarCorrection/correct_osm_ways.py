@@ -436,10 +436,10 @@ class OSMLidarCorrection:
         osm_handler.apply_file(osm_file_path)
         return osm_handler
 
-    def performOSMLidarTuning(dataset_path, dataset_selection):
+    def performOSMLidarTuning(original_dataset_path, dataset_path, dataset_selection):
         dataset = None
         if dataset_selection == "tdot":
-            dataset = TDOTSubset(dataset_path)
+            dataset = TDOTSubset(dataset_path, original_dataset_path)
         else:
             raise Exception("Invalid dataset selection!")
         osm_handler = OSMLidarCorrection.loadOSM(dataset)
@@ -456,4 +456,4 @@ class OSMLidarCorrection:
 
 
 if __name__ == "__main__":
-    OSMLidarCorrection.performOSMLidarTuning("SubsetSelection/", "tdot")
+    OSMLidarCorrection.performOSMLidarTuning("/home/richarwa/Documents/openstreetmap/TDOT_Davidson/", "SubsetSelection/", "tdot")

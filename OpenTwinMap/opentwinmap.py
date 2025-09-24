@@ -26,7 +26,7 @@ class OpenTwinMap:
             creator.compileOSMSubset()
 
     def performOSMLidarTuning(self):
-        OSMLidarCorrection.performOSMLidarTuning(self.loaded_dataset_path, self.dataset_type)
+        OSMLidarCorrection.performOSMLidarTuning(self.dataset_path, self.loaded_dataset_path, self.dataset_type)
 
     def convertOSMToOpenDrive(self):
         map_data = TDOTSubset(self.loaded_dataset_path)
