@@ -5,6 +5,8 @@ import math
 from scipy.optimize import curve_fit
 import subprocess
 import concurrent.futures
+import joblib
+from tqdm import tqdm
 from . import opendrive
 
 
@@ -771,42 +773,69 @@ class OSMToOpenDrive(osmium.SimpleHandler):
     @classmethod
     def generateLateralProfileForRoad(cls, converter, road: opendrive.Road, way_data):
         shapes = []
-        for s in np.arange(
-            0,
-            road.length + converter.reference_line_resolution,
-            converter.reference_line_resolution,
-        ):
-            max_t, min_t = road.generateTBoundsAtS(s)
-            t_positions = np.arange(
-                min_t,
-                max_t + converter.horizontal_line_resolution,
-                converter.horizontal_line_resolution,
-            )
-            xy_positions = []
-            for t in t_positions:
-                x, y = road.projectSAndTToXY(s, t)
-                xy_positions.append([None, x, y, None])
-            elevations = cls.getDEMElevationsAtPoints(converter, xy_positions)
-            center_x, center_y = road.projectSAndTToXY(s, 0.0)
-            center_elevation = cls.getDEMElevationAtPoint(
-                converter, [None, center_x, center_y, None]
-            )
-            elevations -= center_elevation
-            shapes.append(
-                cls.regressShapeEquationAcrossLanes(s, t_positions, elevations)
-            )
+        positions = road.planView.sampleReferenceLine(converter.reference_line_resolution)
+        positions_bridges = cls.markPositionsWithBridges(
+            converter, way_data, positions, road.planView
+        )
+        if way_data["bridge"]:
+            max_t, min_t, _ = road.generateTBoundsAtS(0.0)
+            shapes.append(opendrive.Shape(s=0.0, t=min_t, a=0.0, b=0.0, c=0.0, d=0.0))
+        else:
+            for (s, _, _, _) in positions:
+                _, _, t_bounds = road.generateTBoundsAtS(s)
+                t_bound_lane_keys = sorted([lane for lane in t_bounds], reverse=False)
+                for lane in t_bound_lane_keys:
+                    max_t, min_t = t_bounds[lane]
+                    t_positions = np.arange(
+                        min_t,
+                        max_t + converter.horizontal_line_resolution,
+                        converter.horizontal_line_resolution,
+                    )
+                    xy_positions = []
+                    for t in t_positions:
+                        x, y = road.projectSAndTToXY(s, t)
+                        xy_positions.append([None, x, y, None])
+                    elevations = cls.getDEMElevationsAtPoints(converter, xy_positions)
+                    center_x, center_y = road.projectSAndTToXY(s, 0.0)
+                    center_elevation = road.computeElevationAtS(s)
+                    elevation_floor = float('-inf')
+                    for (
+                        bounds_min,
+                        bounds_max,
+                        elevation_min,
+                        elevation_max,
+                    ) in positions_bridges:
+                        bounds_length = bounds_max - bounds_min
+                        if (
+                            (bounds_min <= s)
+                            and (s <= bounds_max)
+                            and (bounds_length > 0)
+                        ):
+                            elevation_floor = elevation_max
+                            #print("FLOOR: ", elevation_floor, bounds_min, bounds_max, elevation_min, elevation_max)
+                            break
+                    elevations = np.clip(elevations, a_min=elevation_floor, a_max=None)
+                    center_elevation = max(center_elevation, elevation_floor)
+                    if (road.id == "215"):
+                        print(elevations)
+                        print(s)
+                    elevations -= center_elevation
+                    shapes.append(
+                        cls.regressShapeEquationAcrossLanes(s, t_positions, elevations)
+                    )
         return opendrive.LateralProfile(shapes=shapes)
 
-    def generateRoadFromOSMWay(self, wid):
-        way_data = self.ways[wid]
-        id = self.ways[wid]["opendrive_id"]
-        plan_view, road_length = self.generatePlanViewFromOSMWayData(self, way_data)
+    @staticmethod
+    def generateRoadFromOSMWay(converter, wid):
+        way_data = converter.ways[wid]
+        id = converter.ways[wid]["opendrive_id"]
+        plan_view, road_length = converter.generatePlanViewFromOSMWayData(converter, way_data)
         # plan_view, road_length = self.convertLinePlanViewToArcs(plan_view)
-        elevation_profile = self.generateElevationProfileFromOSMWayData(
-            self, way_data, plan_view, road_length
+        elevation_profile = converter.generateElevationProfileFromOSMWayData(
+            converter, way_data, plan_view, road_length
         )
-        lanes = self.generateLanesFromOSMWayData(way_data)
-        linkage = self.generateRoadLinkageFromOSMWayData(self, way_data)
+        lanes = converter.generateLanesFromOSMWayData(way_data)
+        linkage = converter.generateRoadLinkageFromOSMWayData(converter, way_data)
         generated_road = opendrive.Road(
             id=id,
             length=road_length,
@@ -815,18 +844,29 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             lanes=lanes,
             link=linkage,
         )
-        lateral_profile = self.generateLateralProfileForRoad(
-            self, generated_road, way_data
+        lateral_profile = converter.generateLateralProfileForRoad(
+            converter, generated_road, way_data
         )
         generated_road.lateralProfile = lateral_profile
         return generated_road
 
-    def generateRoadsFromOSMWays(self):
+    def generateRoadsFromOSMWays(self, cores=1):
         roads = {}
-        for wid in self.ways:
-            road = self.generateRoadFromOSMWay(wid)
+        print("Generating opendrive roads...")
+        road_results = tqdm(
+                joblib.Parallel(return_as="generator", n_jobs=cores)(
+                    joblib.delayed(OSMToOpenDrive.generateRoadFromOSMWay)(
+                        self,
+                        wid
+                    )
+                    for wid in self.ways
+                ),
+                total=len(self.ways),
+            )
+        for road_result in road_results:
+            road = road_result
             roads[road.id] = road
-            print(road.id)
+            #print(road.id)
         return roads
 
     def generateJunctionsFromOSMNodes(self):

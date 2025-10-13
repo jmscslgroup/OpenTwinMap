@@ -841,16 +841,18 @@ class LateralProfile:
             shapes=[Shape.fromXML(e) for e in element.findall("shape")],
         )
 
-    def getShapeAtS(self, s: float):
+    def getShapeAtSAndT(self, s: float, t: float):
         shapes = self.shapes
-        for shape in shapes:
-            if shape.s >= s:
-                return shape
+        final_shape = shapes[0]
+        for shape in shapes[1:]:
+            if (shape.s <= s) and (shape.t <= t):
+                final_shape = shape
+        return final_shape
 
     # Currently we assume we're using shapes and that there is one shape per portion of the reference line.
     # It's a kludge. We'll make it better ;)
     def computeElevationDeltaAtSAndT(self, s: float, t: float):
-        shape = self.getShapeAtS(s)
+        shape = self.getShapeAtSAndT(s, t)
         return shape.computeHShape(t)
 
 
@@ -1929,6 +1931,9 @@ class Road:
 
     def projectSAndTToXY(self, s: float, t: float = 0.0):
         return self.planView.projectSAndTToXY(s, t)
+    
+    def computeElevationAtS(self, s: float):
+        return self.elevationProfile.computeElevationAtS(s)
 
     # No superelevation or crossfall for now
     def computeElevationAtSAndT(self, s: float, t: float):
@@ -2003,9 +2008,12 @@ class Road:
 
     def generateTBoundsAtS(self, s: float):
         total_lanes, lane_section, lane_offset = self.getLanes(s)
+        lane_keys = sorted([lane for lane in total_lanes], reverse=False)
         max_t = float("-inf")
         min_t = float("inf")
-        for lane in total_lanes:
+        lane_bounds = {}
+        for lane_id in lane_keys:
+            lane = total_lanes[lane_id]
             lt, rt = self.getLaneBoundFromReferenceLine(
                 s, lane, lane_section, lane_offset
             )
@@ -2013,9 +2021,79 @@ class Road:
                 max_t = lt
             if rt < min_t:
                 min_t = rt
-        return max_t, min_t
+            lane_bounds[lane_id] = (lt, rt)
+        return max_t, min_t, lane_bounds
 
     def computeLaneVertices(
+        self,
+        s: float,
+        thickness: float,
+        lane: Lane,
+        section: LaneSection,
+        lane_offset: LaneOffset,
+        vertices: int = 5
+    ):
+        lt, rt = self.getLaneBoundFromReferenceLine(s, lane, section, lane_offset)
+        elevation = self.elevationProfile.computeElevationAtS(s)
+        lx, ly = self.planView.projectSAndTToXY(s, lt)
+        rx, ry = self.planView.projectSAndTToXY(s, rt)
+        top_vertices = []
+        bottom_vertices = []
+        dx = rx - lx
+        dy = ry - ly
+        dt = rt - lt
+        dx_dv = dx / float(vertices - 1)
+        dy_dv = dy / float(vertices - 1)
+        dt_dv = dt / float(vertices - 1)
+        for i in range(vertices):
+            x_current = lx + (i * dx_dv)
+            y_current = ly + (i * dy_dv)
+            t_current = lt + (i * dt_dv)
+            elevation_delta = self.lateralProfile.computeElevationDeltaAtSAndT(s, t_current)
+            elevation_top = elevation + elevation_delta + (thickness / 2.0)
+            elevation_bottom = elevation + elevation_delta - (thickness / 2.0)
+            top_vertex = [x_current, y_current, elevation_top]
+            bottom_vertex = [x_current, y_current, elevation_bottom]
+            top_vertices.append(top_vertex)
+            bottom_vertices.append(bottom_vertex)
+        return top_vertices, bottom_vertices
+
+
+    # Fetches the bounding vertices for each lane and currently just returns the outermost lane and the innermost lane's boundaries
+    def generateRoadVerticesAtS(
+        self, s: float, thickness: float = 1.0, opendrive_origin: list[float] = None
+    ):
+        lane_vertices = self.computeLanesVertices(s, thickness)
+        lane_vertices_keys = list(lane_vertices.keys())
+        lane_vertices_keys.sort(reverse=True)
+        '''
+        left_most_lane_vertices, right_most_lane_vertices = (
+            lane_vertices[lane_vertices_keys[0]],
+            lane_vertices[lane_vertices_keys[-1]],
+        )
+        vertices = [
+            left_most_lane_vertices[0],
+            right_most_lane_vertices[1],
+            left_most_lane_vertices[2],
+            right_most_lane_vertices[3],
+        ]
+        '''
+        vertices_top = []
+        vertices_bottom = []
+        for i in range(len(lane_vertices_keys)):
+            lane = lane_vertices_keys[i]
+            lane_vertices_top, lane_vertices_bottom = lane_vertices[lane]
+            vertices_top = vertices_top + lane_vertices_top
+            vertices_bottom = vertices_bottom + lane_vertices_bottom
+        vertices = vertices_top + vertices_bottom
+        if opendrive_origin is not None:
+            for i in range(len(vertices)):
+                vertices[i][0] -= opendrive_origin[0]
+                vertices[i][1] -= opendrive_origin[1]
+                vertices[i][2] -= opendrive_origin[2]
+        return vertices
+    
+    def computeLaneVerticesOld(
         self,
         s: float,
         thickness: float,
@@ -2040,24 +2118,24 @@ class Road:
             lane_section.center.lanes,
             lane_section.right.lanes if lane_section.right is not None else [],
         )
-        total_lanes = []
+        total_lanes = {}
         for lane in left_lanes:
-            total_lanes.append(lane)
+            total_lanes[lane.id] = lane
         for lane in right_lanes:
-            total_lanes.append(lane)
+            total_lanes[lane.id] = lane
         return total_lanes, lane_section, lane_offset
 
     def computeLanesVertices(self, s: float, thickness: float):
         total_lanes, lane_section, lane_offset = self.getLanes(s)
         lanes_vertices = {}
         for lane in total_lanes:
-            lanes_vertices[lane.id] = self.computeLaneVertices(
-                s, thickness, lane, lane_section, lane_offset
+            lanes_vertices[lane] = self.computeLaneVertices(
+                s, thickness, total_lanes[lane], lane_section, lane_offset
             )
         return lanes_vertices
 
     # Fetches the bounding vertices for each lane and currently just returns the outermost lane and the innermost lane's boundaries
-    def generateRoadVerticesAtS(
+    def generateRoadVerticesAtSOld(
         self, s: float, thickness: float = 1.0, opendrive_origin: list[float] = None
     ):
         lane_vertices = self.computeLanesVertices(s, thickness)
@@ -2067,11 +2145,12 @@ class Road:
             lane_vertices[lane_vertices_keys[0]],
             lane_vertices[lane_vertices_keys[-1]],
         )
+        lane_vertices_length = len(left_most_lane_vertices) / 2
         vertices = [
             left_most_lane_vertices[0],
-            right_most_lane_vertices[1],
-            left_most_lane_vertices[2],
-            right_most_lane_vertices[3],
+            right_most_lane_vertices[lane_vertices_length - 1],
+            left_most_lane_vertices[lane_vertices_length],
+            right_most_lane_vertices[lane_vertices_length + lane_vertices_length - 1],
         ]
         if opendrive_origin is not None:
             for i in range(len(vertices)):
