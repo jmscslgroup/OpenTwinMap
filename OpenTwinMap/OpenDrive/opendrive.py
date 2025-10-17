@@ -626,6 +626,12 @@ class PlanView:
                 s = geom.s + (geom_length * i / (n - 1))
                 samples.append((s, x, y, phi))
         return np.array(samples)
+    
+    def getSLength(self):
+        total_length = 0.0
+        for geom in self.geometries:
+            total_length += geom.length
+        return total_length
 
     def projectXYToS(self, x, y):
         best_dist = float("inf")
@@ -2031,7 +2037,7 @@ class Road:
         lane: Lane,
         section: LaneSection,
         lane_offset: LaneOffset,
-        vertices: int = 5
+        vertices: int = 4
     ):
         lt, rt = self.getLaneBoundFromReferenceLine(s, lane, section, lane_offset)
         elevation = self.elevationProfile.computeElevationAtS(s)

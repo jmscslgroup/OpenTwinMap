@@ -144,137 +144,97 @@ def _convertObjToFbxMethod(obj_path, fbx_path):
     except subprocess.CalledProcessError as e:
         raise e
 
-
-def _generateRoadMeshMethodOld(
-    carla_asset_root,
-    full_mesh_path,
-    mesh_path,
-    road,
-    original_bounds,
-    max_step=0.1,
-    thickness=0.25,
-):
-    import math
-    import trimesh
+def _trimesh_to_o3d_with_triangle_uvs(mesh):
     import numpy as np
-    import os
+    import trimesh as tm
+    import open3d as o3d
+    V = mesh.vertices.astype(np.float64, copy=False)
+    F = mesh.faces.astype(np.int32, copy=False)
 
-    # Limit NumPy/OpenBLAS threads
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    os.environ["NUMEXPR_NUM_THREADS"] = "1"
-    os.environ["OMP_NUM_THREADS"] = "1"
-    """Generate a trimesh mesh for this road.
-
-    The mesh is built by sampling points along the road reference line,
-    computing the left and right offsets based on lane widths, and extruding
-    those edges downwards by `thickness`.  Triangles are generated for
-    the top surface, bottom surface, and the sides and ends of the road.
-
-    Args:
-        thickness: thickness (depth) of the road in metres.  The road
-            surface sits at z=0 and the bottom face sits at z=-thickness.
-
-    Returns:
-        A trimesh.Trimesh object containing the vertices, faces and UVs.
-    """
-    # Sample along reference line
-    ref_samples = road.planView.sampleReferenceLine(resolution=max_step)
-    num = len(ref_samples)
-    vertices = []
-    faces = []
-    uvs = []
-
-    # Build vertices and UVs: for each sample create four vertices (top left,
-    # top right, bottom left, bottom right).  We'll normalise u by road
-    # length and v by width or depth accordingly.
-    for idx, (s, x, y, phi) in enumerate(ref_samples):
-
-        # Normalised coordinate along length
-        u_coord = s / road.length if road.length > 0 else 0.0
-        # Add vertices: order matters for indexing later
-        opendrive_origin = [0, 0, original_bounds[2]]
-        vertices.extend(road.generateRoadVerticesAtS(s, thickness, opendrive_origin))
-        # UVs for these four vertices
-        # Top surface: v=0 at left, v=1 at right
-        uvs.extend(
-            [
-                [u_coord, 0.0],  # left top
-                [u_coord, 1.0],  # right top
-                [u_coord, 0.0],  # left bottom uses same v as top for simplicity
-                [u_coord, 1.0],  # right bottom
-            ]
-        )
-
-    for i in range(num - 1):
-        # base index for sample i
-        idx0 = i * 4
-        idx1 = (i + 1) * 4
-        # Indices of vertices
-        lt0, rt0, lb0, rb0 = idx0, idx0 + 1, idx0 + 2, idx0 + 3
-        lt1, rt1, lb1, rb1 = idx1, idx1 + 1, idx1 + 2, idx1 + 3
-        # Top surface (two triangles)
-        faces.append([lt0, rt1, lt1])
-        faces.append([lt0, rt0, rt1])
-        # Bottom surface (note: reverse winding for correct normals)
-        faces.append([lb0, rb1, rb0])
-        faces.append([lb0, lb1, rb1])
-        # Left side
-        faces.append([lb0, lt1, lb1])
-        faces.append([lb0, lt0, lt1])
-        # Right side
-        faces.append([rt0, rb1, rt1])
-        faces.append([rt0, rb0, rb1])
-    # Caps (start and end)
-    # Start cap: first sample index 0-3
-    lt0, rt0, lb0, rb0 = 0, 1, 2, 3
-    # Two triangles
-    faces.append([lt0, rb0, rt0])
-    faces.append([lt0, rb0, lb0])
-    # End cap: last sample indices
-    lt1, rt1, lb1, rb1 = (
-        (num - 1) * 4,
-        (num - 1) * 4 + 1,
-        (num - 1) * 4 + 2,
-        (num - 1) * 4 + 3,
+    o3 = o3d.geometry.TriangleMesh(
+        vertices=o3d.utility.Vector3dVector(V),
+        triangles=o3d.utility.Vector3iVector(F)
     )
-    faces.append([lt1, rb1, lb1])
-    faces.append([lt1, rt1, rb1])
 
-    vertices_np = np.array(vertices)
-    faces_np = np.array(faces)
-    uvs_np = np.array(uvs)
-    min_x, min_y, min_z = vertices_np.min(axis=0)
-    max_x, max_y, max_z = vertices_np.max(axis=0)
-    vertices_np -= np.array([min_x, min_y, min_z])
-    # min_x, min_y, min_z = min_x - original_bounds[0], min_y - original_bounds[1], min_z - original_bounds[2]
-    # max_x, max_y, max_z = max_x - original_bounds[0], max_y - original_bounds[1], max_z - original_bounds[2]
-    # Create the mesh
-    mesh = trimesh.Trimesh(vertices=vertices_np, faces=faces_np, process=False)
-    mesh.visual.uv = uvs
-    # Let trimesh compute vertex normals for smooth shading
-    # mesh.compute_vertex_normals()
-    mesh.export(full_mesh_path)
+    o3.compute_vertex_normals()
 
-    mesh_metadata = {}
-    mesh_metadata["full_mesh_path"] = full_mesh_path
-    mesh_metadata["min_y"] = min_x
-    mesh_metadata["min_x"] = min_y
-    mesh_metadata["max_y"] = max_x
-    mesh_metadata["max_x"] = max_y
-    mesh_metadata["min_z"] = min_z
-    mesh_metadata["max_z"] = max_z
-    mesh_metadata["road_data"] = ET.tostring(
-        road.toXML(), encoding="unicode", method="xml"
-    )
-    mesh_metadata["obj_path"] = mesh_path
-    mesh_metadata["fbx_path"] = mesh_metadata["obj_path"].replace(".obj", ".fbx")
-    mesh_metadata["name"] = os.path.splitext(os.path.basename(mesh_path))[0]
-    mesh_metadata["unreal_path"] = f'{carla_asset_root}/{mesh_metadata["name"]}'
-    mesh_metadata["material"] = (
-        "/Game/Carla/Static/GenericMaterials/RoadPainterMaterials/MI_Road_01.MI_Road_01"
-    )
-    return mesh_metadata
+    if hasattr(mesh.visual, "uv") and mesh.visual.uv is not None and len(mesh.visual.uv) == len(mesh.vertices):
+        UV = mesh.visual.uv.astype(np.float64, copy=False)
+        tri_uvs = UV[F].reshape(-1, 2)
+        o3.triangle_uvs = o3d.utility.Vector2dVector(tri_uvs)
+    else:
+        pass
+
+    return o3
+
+def _o3d_to_trimesh_with_uvs(o3):
+    import numpy as np
+    import trimesh as tm
+    import open3d as o3d
+
+    V = np.asarray(o3.vertices, dtype=np.float64)
+    F = np.asarray(o3.triangles, dtype=np.int64)
+
+    if not hasattr(o3, "triangle_uvs") or len(o3.triangle_uvs) == 0:
+        return tm.Trimesh(vertices=V, faces=F, process=False)
+
+    tri_uvs = np.asarray(o3.triangle_uvs, dtype=np.float64)
+
+    new_vertices = []
+    new_uvs = []
+    new_faces = []
+
+    def key(old_vi, uv):
+        return (int(old_vi), round(float(uv[0]), 12), round(float(uv[1]), 12))
+
+    mapping = {}
+
+    M = F.shape[0]
+    for fi in range(M):
+        face = F[fi]
+        face_uvs = tri_uvs[fi*3 : fi*3+3]
+        new_face = []
+
+        for corner in range(3):
+            old_vi = int(face[corner])
+            uv = face_uvs[corner]
+            k = key(old_vi, uv)
+
+            if k in mapping:
+                new_vi = mapping[k]
+            else:
+                new_vi = len(new_vertices)
+                mapping[k] = new_vi
+                new_vertices.append(V[old_vi])
+                new_uvs.append(uv)
+
+            new_face.append(new_vi)
+
+        new_faces.append(new_face)
+
+    new_vertices = np.asarray(new_vertices, dtype=np.float64)
+    new_faces = np.asarray(new_faces, dtype=np.int64)
+    new_uvs = np.asarray(new_uvs, dtype=np.float64)
+
+    m = tm.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
+    m.visual.uv = new_uvs
+
+    # Optional cleanup
+    m.remove_degenerate_faces()
+    m.remove_unreferenced_vertices()
+    m.fix_normals()
+    return m
+
+def _performRoadMeshVertexDecimation(mesh):
+    import open3d as o3d
+    o3 = _trimesh_to_o3d_with_triangle_uvs(mesh)
+
+    # (Do your processing: decimation, smoothing, etc.)
+    o3_dec = o3.simplify_quadric_decimation(target_number_of_triangles=mesh.faces.shape[0]//4)
+
+    # <- Back to Trimesh, preserving UV seams by splitting vertices if needed
+    mesh_back = _o3d_to_trimesh_with_uvs(o3_dec)
+    return mesh_back
 
 def _generateRoadMeshMethod(
     carla_asset_root,
@@ -390,9 +350,10 @@ def _generateRoadMeshMethod(
     # max_x, max_y, max_z = max_x - original_bounds[0], max_y - original_bounds[1], max_z - original_bounds[2]
     # Create the mesh
     mesh = trimesh.Trimesh(vertices=vertices_np, faces=faces_np, process=False)
-    mesh.visual.uv = uvs
+    mesh.visual.uv = uvs_np
     # Let trimesh compute vertex normals for smooth shading
     # mesh.compute_vertex_normals()
+    mesh = _performRoadMeshVertexDecimation(mesh)
     mesh.export(full_mesh_path)
 
     mesh_metadata = {}
@@ -698,7 +659,7 @@ class CarlaAssetCreator:
                     self.metadata["roads"][mesh_metadata["name"]] = mesh_metadata
                     print(mesh_metadata["name"])
 
-    def createMergedRoadsGroups(self, group_size=25):
+    def createMergedRoadsGroups(self, group_size=100):
         groups = []
 
         road_keys = list(self.metadata["roads"].keys())

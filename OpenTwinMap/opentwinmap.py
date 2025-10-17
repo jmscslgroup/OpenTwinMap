@@ -57,7 +57,7 @@ class OpenTwinMap:
     def runPipeline(self):
         #self.importSourceData()
         #self.performOSMLidarTuning()
-        #self.convertOSMToOpenDrive()
+        self.convertOSMToOpenDrive()
         self.create3DAssets()
         self.export3DAssetsToCARLA()
 
