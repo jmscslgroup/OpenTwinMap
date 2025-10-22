@@ -1107,14 +1107,15 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                 connections = []
                 junction_type = "default"
                 # opendrive.Connection()
-                junction_data = self.junctions[junction_id]["junction_data"]
+                junction_data = self.junctions[junction_id]
+                junction_type_data = junction_data["type_data"]
                 # Ramps
                 # Two connections - the highways and the ramp itself
                 if "ramp" in junction_data["type"]:
                     junction_type = "virtual"
-                    ramp_wid = junction_data["ramp_way"]
-                    incoming_highway_wid = junction_data["incoming_motorway"]
-                    outgoing_highway_wid = junction_data["outgoing_motorway"]
+                    ramp_wid = junction_type_data["ramp_way"]
+                    incoming_highway_wid = junction_type_data["incoming_motorway"]
+                    outgoing_highway_wid = junction_type_data["outgoing_motorway"]
                     ramp_way = self.ways[ramp_wid]
                     incoming_highway = self.ways[incoming_highway_wid]
                     outgoing_highway = self.ways[outgoing_highway_wid]
