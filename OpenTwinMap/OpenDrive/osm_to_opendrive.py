@@ -6,6 +6,7 @@ from scipy.optimize import curve_fit
 import subprocess
 import concurrent.futures
 import joblib
+import sys
 from tqdm import tqdm
 from . import opendrive
 
@@ -186,8 +187,10 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                 if (lane_forward + lane_backward) < lane_count:
                     lane_backward += 1
             way = {
+                "virtual_nodes": [],
                 "lane_width": lane_width,
                 "lane_count": lane_count,
+                "way_type": lane_type,
                 "bridge": bridge,
                 "oneway": oneway,
                 "lane_count_backward": lane_backward,
@@ -242,12 +245,31 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                     for entry in node["connected_ways"]:
                         if entry != wid:
                             way["connected_ways"].append(entry)
-                            if nid == beginning_node:
+                            if (nid == beginning_node) and (self.ways[entry]["nodes"][-1] == nid):
                                 way["predecessor_way"] = entry
-                            elif nid == ending_node:
+                            elif (nid == ending_node) and (self.ways[entry]["nodes"][0] == nid):
                                 way["successor_way"] = entry
 
+    def countEachTypeOfWay(self, ways):
+        counts = {
+                "all": [],
+                "motorway": [],
+                "motorway_link": [],
+                "primary": [],
+                "secondary": [],
+                "tertiary": [],
+                "residential": [],
+                "service": []
+        }
+        for wid in ways:
+            wid_type = self.ways[wid]["way_type"]
+            if wid_type in counts:
+                counts[wid_type].append(wid)
+                counts["all"].append(wid)
+        return counts
+
     def detectJunctions(self):
+        virtual_nodes = {}
         for nid in self.nodes:
             node = self.nodes[nid]
             # Junction!
@@ -257,9 +279,77 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                     "ways": node["connected_ways"],
                     "id": junction_id,
                     "node_id": nid,
+                    "way_types_count": self.countEachTypeOfWay(node["connected_ways"]),
+                    "type": "",
+                    "type_data": None
                 }
                 self.junctions[junction_id] = junction_data
                 node["junction_id"] = junction_id
+                # Detect on-ramps and off ramps:
+                if (len(junction_data["way_types_count"]["all"]) == 3) and (len(junction_data["way_types_count"]["motorway"]) == 2) and (len(junction_data["way_types_count"]["motorway_link"]) == 1):
+                    # Detect on-ramps
+                    incoming_motorway_wid = None
+                    outgoing_motorway_wid = None
+                    for motorway_wid in self.junctions[junction_id]["way_types_count"]["motorway"]:
+                        if nid == self.ways[motorway_wid]["nodes"][0]:
+                            outgoing_motorway_wid = motorway_wid
+                        elif nid == self.ways[motorway_wid]["nodes"][-1]:
+                            incoming_motorway_wid = motorway_wid
+                    assert (incoming_motorway_wid is not None), f"NID {nid} is marked as a ramp but has no incoming motorway_wid"
+                    assert (outgoing_motorway_wid is not None), f"NID {nid} is marked as a ramp but has no outgoing motorway_wid"
+                    motorway_link_wid = junction_data["way_types_count"]["motorway_link"][0]
+                    type_data = {}
+                    type_data["ramp_way"] = motorway_link_wid
+                    type_data["incoming_motorway"] = incoming_motorway_wid
+                    type_data["outgoing_motorway"] = outgoing_motorway_wid
+                    p0 = node["meters_coordinates"]
+                    p1 = self.nodes[self.ways[outgoing_motorway_wid]["nodes"][1]]["meters_coordinates"]
+
+                    # Segment direction
+                    direction = p1[:2] - p0[:2]
+                    length = np.linalg.norm(direction)
+                    if length == 0:
+                        continue
+                    direction /= length
+
+                    # Perpendicular (2D) vector
+                    perp = np.array([direction[1], -direction[0], 0])
+                    # Off-ramp
+                    # For off-ramps we have to create a virtual node at the connection spot in place of the original connecting spot that is placed n forward lanes aft of the outgoing way's centerline.
+                    # for the off-ramp it is the first node of the ramp
+                    if nid == self.ways[motorway_link_wid]["nodes"][0]:
+                        off_ramp_lane_number = self.ways[incoming_motorway_wid]["lane_count_forward"]
+                        p_ramp = p0 + (((off_ramp_lane_number - 1) * self.ways[incoming_motorway_wid]["lane_width"]) * perp)
+                        p_ramp_nid = f"{incoming_motorway_wid}_ramp"
+                        virtual_nodes[p_ramp_nid] = {
+                            "nid": p_ramp_nid,
+                            "meters_coordinates": p_ramp,
+                            "connected_ways": [incoming_motorway_wid, motorway_link_wid],
+                            "junction_id": junction_id
+                        }
+                        self.ways[motorway_link_wid]["nodes"][0] = p_ramp_nid
+                        self.ways[incoming_motorway_wid]["virtual_nodes"].append(p_ramp_nid)
+                        self.junctions[junction_id]["type"] = "off_ramp"
+
+                    # On-ramp
+                    # For on-ramps we have to create a virtual node at the connection spot in place of the original connecting spot that is placed n forward lanes aft of the outgoing way's centerline.
+                    # for the on-ramp it is the last node of the ramp
+                    elif nid == self.ways[motorway_link_wid]["nodes"][-1]:
+                        on_ramp_lane_number = self.ways[outgoing_motorway_wid]["lane_count_forward"]
+                        p_ramp = p0 + (((on_ramp_lane_number - 1) * self.ways[outgoing_motorway_wid]["lane_width"]) * perp)
+                        p_ramp_nid = f"{outgoing_motorway_wid}_ramp"
+                        virtual_nodes[p_ramp_nid] = {
+                            "nid": p_ramp_nid,
+                            "meters_coordinates": p_ramp,
+                            "connected_ways": [motorway_link_wid, outgoing_motorway_wid],
+                            "junction_id": junction_id
+                        }
+                        self.ways[motorway_link_wid]["nodes"][-1] = p_ramp_nid
+                        self.ways[outgoing_motorway_wid]["virtual_nodes"].append(p_ramp_nid)
+                        self.junctions[junction_id]["type"] = "on_ramp"
+                    self.junctions[junction_id]["type_data"] = type_data
+        for nid in virtual_nodes:
+            self.nodes[nid] = virtual_nodes[nid]                
 
     def generateOpenDriveHeader(self):
         geoReference = opendrive.GeoReference(
@@ -281,10 +371,26 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         new_id = self.opendrive_id_count + 1
         self.opendrive_id_count = new_id
         return str(new_id)
+    
+    @classmethod
+    def generateSLengthFromOSMWayData(cls, converter_nodes, way_data):
+        s = 0.0
+        if len(way_data["nodes"]) > 1: # At least two nodes
+            node_pairs = _generatePairs(way_data["nodes"])
+            for pair in node_pairs:
+                node1 = converter_nodes[pair[0]]
+                node2 = converter_nodes[pair[1]]
+                x1 = node1["meters_coordinates"][0]
+                y1 = node1["meters_coordinates"][1]
+                x2 = node2["meters_coordinates"][0]
+                y2 = node2["meters_coordinates"][1]
+                pair_length = _distance(x1, y1, x2, y2)
+                s += pair_length
+        return s
 
     # For now, even curves are modeled as lines. Each pair of nodes in a way constitutes a line.
     @classmethod
-    def generatePlanViewFromOSMWayData(self, converter_nodes, way_data):
+    def generatePlanViewFromOSMWayData(cls, converter_nodes, way_data):
         geometries = []
         s = 0.0
         if len(way_data["nodes"]) > 1:  # At least two nodes!
@@ -313,26 +419,42 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         return opendrive.PlanView(geometries=geometries), s
 
     @classmethod
-    def generateLaneOffsetsFromOSMWayData(cls, way_data):
+    def generateLaneOffsetsFromOSMWayData(cls, converter, way_data):
         lane_offsets = []
+        '''
         if way_data["oneway"]:
+            lane_count = way_data["lane_count"]
+            a = 0.0
+            b = 0.0
+
+            if (lane_count == 1)
+            # Our centerline will be on the secondrightmost lane + 1
+            a = ((way_data["lane_count"] // 2) + 1) * way_data["lane_width"]
+            b = 0.0
+            lane_count_preceding = converter.ways[way_data["predecessor_way"]]["lane_count"] if way_data["predecessor_way"] in converter.ways else None
+            lane_count_succeeding = converter.ways[way_data["successor_way"]]["lane_count"] if way_data["successor_way"] in converter.ways else None
+            # Nudge to the right by half a lane so that if we are adding a new lane we line up fine!
+            if (lane_count_preceding is not None) and ((lane_count - 1) == lane_count_preceding):
+                a -= (way_data["lane_width"] / 2)
+
             # Center will be to the lefthand side of the road completely - all lanes will be in the right section.
             lane_offsets.append(
                 opendrive.LaneOffset(
                     s=0.0,
-                    a=(way_data["lane_count"] / 2) * way_data["lane_width"],
-                    b=0.0,
+                    a=a,
+                    b=b,
                     c=0.0,
                     d=0.0,
                 )
             )
         else:
-            lane_offsets.append(opendrive.LaneOffset(s=0.0, a=0.0, b=0.0, c=0.0, d=0.0))
+        '''
+        lane_offsets.append(opendrive.LaneOffset(s=0.0, a=0.0, b=0.0, c=0.0, d=0.0))
         return lane_offsets
 
     # Any opposite direction lanes go here.
     @classmethod
-    def generateLeftLanesFromOSMWayData(cls, way_data):
+    def generateLeftLanesFromOSMWayData(cls, converter, way_data):
         lanes = []
         lane_count = way_data["lane_count_backward"]
         lane_width = way_data["lane_width"]
@@ -353,40 +475,63 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         return opendrive.LaneGroup(lanes=lanes)
 
     @classmethod
-    def generateCenterLaneFromOSMWayData(cls, way_data):
+    def generateCenterLaneFromOSMWayData(cls, converter, way_data):
         return opendrive.LaneGroup(lanes=[opendrive.Lane(id=0)])
 
     @classmethod
-    def generateRightLanesFromOSMWayData(cls, way_data):
+    # If the preceding way has one less lane than we do, we scale up the rightmost lane ('Murica)
+    # If the succeeding way has one less lane than we do, we scale down the right most lane
+    # If BOTH are true - that likely means we have a junction here. We give precedence to scaling up and then count on the lane to diverge on the next way.
+    def generateRightLanesFromOSMWayData(cls, converter, way_data):
         lanes = []
         lane_count = way_data["lane_count_forward"]
         lane_width = way_data["lane_width"]
         for i in range(lane_count):
             lane_id = (i + 1) * -1
             lane_type = "driving"
+            scale_up = False
+            scale_down = False
+            '''
             if i == (lane_count - 1):
                 lane_type = "border"
+                lane_count_preceding = converter.ways[way_data["predecessor_way"]]["lane_count_forward"] if way_data["predecessor_way"] in converter.ways else None
+                lane_count_succeeding = converter.ways[way_data["successor_way"]]["lane_count_forward"] if way_data["successor_way"] in converter.ways else None
+                if (lane_count_preceding is not None) and ((lane_count - 1) == lane_count_preceding):
+                    scale_up = True
+                elif (lane_count_succeeding is not None) and ((lane_count - 1) == lane_count_succeeding):
+                    scale_down = True
+            '''
+            a = lane_width
+            b = 0.0
+            if scale_up:
+                a = 0.0
+                b = lane_width / cls.generateSLengthFromOSMWayData(converter.nodes, way_data)
+            elif scale_down:
+                b = -lane_width / cls.generateSLengthFromOSMWayData(converter.nodes, way_data)
             lanes.append(
                 opendrive.Lane(
                     id=lane_id,
                     type=lane_type,
                     level=False,
                     widths=[
-                        opendrive.Width(sOffset=0.0, a=lane_width, b=0.0, c=0.0, d=0.0)
+                        opendrive.Width(sOffset=0.0, a=a, b=b, c=0.0, d=0.0)
                     ],
                 )
             )
         return opendrive.LaneGroup(lanes=lanes)
 
     # By default, only one lane section
+    # If the preceding way has one less lane than we do, we scale up the rightmost lane ('Murica)
+    # If the succeeding way has one less lane than we do, we scale down the right most lane
+    # If BOTH are true - that likely means we have a junction here. We give precedence to scaling up and then count on the lane to diverge on the next way.
     @classmethod
-    def generateLaneSectionsFromOSMWayData(cls, way_data):
+    def generateLaneSectionsFromOSMWayData(cls, converter, way_data):
         lane_sections = []
         s = 0.0
         single_side = False
-        left_group = cls.generateLeftLanesFromOSMWayData(way_data)
-        center_group = cls.generateCenterLaneFromOSMWayData(way_data)
-        right_group = cls.generateRightLanesFromOSMWayData(way_data)
+        left_group = cls.generateLeftLanesFromOSMWayData(converter, way_data)
+        center_group = cls.generateCenterLaneFromOSMWayData(converter, way_data)
+        right_group = cls.generateRightLanesFromOSMWayData(converter, way_data)
 
         lane_sections.append(
             opendrive.LaneSection(
@@ -400,9 +545,9 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         return lane_sections
 
     @classmethod
-    def generateLanesFromOSMWayData(cls, way_data):
-        lane_offsets = cls.generateLaneOffsetsFromOSMWayData(way_data)
-        lane_sections = cls.generateLaneSectionsFromOSMWayData(way_data)
+    def generateLanesFromOSMWayData(cls, converter, way_data):
+        lane_offsets = cls.generateLaneOffsetsFromOSMWayData(converter, way_data)
+        lane_sections = cls.generateLaneSectionsFromOSMWayData(converter, way_data)
 
         return opendrive.Lanes(laneOffsets=lane_offsets, laneSections=lane_sections)
 
@@ -412,7 +557,12 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         predecessor = None
         if way_data["predecessor_way"] != None:
             predecessor_way = converter.ways[way_data["predecessor_way"]]
-            shared_nid = list(set(way_data["nodes"]) & set(predecessor_way["nodes"]))[0]
+            try:
+                shared_nid = list((set(way_data["nodes"]) | set(way_data["virtual_nodes"])) & (set(predecessor_way["nodes"]) | set(predecessor_way["virtual_nodes"])))[0]
+            except Exception as e:
+                print("OFFENDING WAYS ", set(way_data["nodes"]), set(predecessor_way["nodes"]), set(way_data["nodes"]) & set(predecessor_way["nodes"]))
+                sys.stdout.flush()
+                raise e
             shared_node = converter.nodes[shared_nid]
             predecessor_type = (
                 "junction" if (shared_node["junction_id"] != "-1") else "road"
@@ -429,7 +579,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         successor = None
         if way_data["successor_way"] != None:
             successor_way = converter.ways[way_data["successor_way"]]
-            shared_nid = list(set(way_data["nodes"]) & set(successor_way["nodes"]))[0]
+            shared_nid = list((set(way_data["nodes"]) | set(way_data["virtual_nodes"])) & (set(successor_way["nodes"]) | set(successor_way["virtual_nodes"])))[0]
             shared_node = converter.nodes[shared_nid]
             successor_type = (
                 "junction" if (shared_node["junction_id"] != "-1") else "road"
@@ -828,7 +978,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         positions_bridges = cls.markPositionsWithBridges(
             converter, way_data, positions, road.planView
         )
-        print(f"Bridge data {road.id}: {positions_bridges}")
+        #print(f"Bridge data {road.id}: {positions_bridges}")
         if way_data["bridge"]:
             '''
             max_t, min_t, _ = road.generateTBoundsAtS(0.0)
@@ -910,7 +1060,7 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         elevation_profile = OSMToOpenDrive.generateElevationProfileFromOSMWayData(
             converter, way_data, plan_view, road_length
         )
-        lanes = OSMToOpenDrive.generateLanesFromOSMWayData(way_data)
+        lanes = OSMToOpenDrive.generateLanesFromOSMWayData(converter, way_data)
         linkage = OSMToOpenDrive.generateRoadLinkageFromOSMWayData(converter, way_data)
         generated_road = opendrive.Road(
             id=id,
@@ -955,12 +1105,61 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             junction_id = node["junction_id"]
             if junction_id != "-1":
                 connections = []
+                junction_type = "default"
                 # opendrive.Connection()
+                junction_data = self.junctions[junction_id]["junction_data"]
+                # Ramps
+                # Two connections - the highways and the ramp itself
+                if "ramp" in junction_data["type"]:
+                    junction_type = "virtual"
+                    ramp_wid = junction_data["ramp_way"]
+                    incoming_highway_wid = junction_data["incoming_motorway"]
+                    outgoing_highway_wid = junction_data["outgoing_motorway"]
+                    ramp_way = self.ways[ramp_wid]
+                    incoming_highway = self.ways[incoming_highway_wid]
+                    outgoing_highway = self.ways[outgoing_highway_wid]
+                    common_highway_lanes = [
+                        *[str(lane_id) for lane_id in range(outgoing_highway["lane_count_backward"] + 1, 0, -1)],
+                        *[str(lane_id) for lane_id in range(-1, outgoing_highway["lane_count_forward"] + 1, -1)]
+                    ] if junction_data["type"] == "off_ramp" else [
+                        *[str(lane_id) for lane_id in range(incoming_highway["lane_count_backward"] + 1, 0, -1)],
+                        *[str(lane_id) for lane_id in range(-1, incoming_highway["lane_count_forward"] + 1, -1)]
+                    ]
+                    #Highway-to-highway connection
+                    highway_to_highway_connection = opendrive.Connection(
+                        id="1",
+                        incomingRoad=incoming_highway["opendrive_id"],
+                        connectingRoad=outgoing_highway["opendrive_id"],
+                        contactPoint="start",
+                        laneLinks=[opendrive.LaneLinkJunction(fromId=int(entry), toId=int(entry)) for entry in common_highway_lanes]
+                    )
+                    connections.append(highway_to_highway_connection)
+                    # Right now we assume ramps only have one lane. Later we will probably have to map all lanes in a ramp to the rightmost lane for simplicity.
+                    if junction_data["type"] == "on_ramp":
+                        connecting_lane_id = -int(outgoing_highway["lane_count_forward"])
+                        ramp_connection = opendrive.Connection(
+                            id="2",
+                            incomingRoad=ramp_way["opendrive_id"],
+                            connectingRoad=outgoing_highway["opendrive_id"],
+                            contactPoint="start",
+                            laneLinks=[opendrive.LaneLinkJunction(fromId=-1, toId=connecting_lane_id)]
+                        )
+                        connections.append(ramp_connection)
+                    elif junction_data["type"] == "off_ramp":
+                        connecting_lane_id = -int(incoming_highway["lane_count_forward"])
+                        ramp_connection = opendrive.Connection(
+                            id="2",
+                            incomingRoad=incoming_highway["opendrive_id"],
+                            connectingRoad=ramp_way["opendrive_id"],
+                            contactPoint="start",
+                            laneLinks=[opendrive.LaneLinkJunction(fromId=connecting_lane_id, toId=-1)]
+                        )
+                        connections.append(ramp_connection)
                 junctions.append(
                     opendrive.Junction(
                         id=junction_id,
                         name=junction_id,
-                        type="default",
+                        type=junction_type,
                         connections=connections,
                     )
                 )

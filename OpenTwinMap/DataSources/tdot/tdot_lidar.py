@@ -34,8 +34,13 @@ class TDOTLidarCreator:
         points = numpy.vstack((las.x, las.y, las.z)).transpose()
         points *= TDOTUtils.feet_to_meters
 
+        print("Building cloud and computing normals....")
         pcd = open3d.geometry.PointCloud()
         pcd.points = open3d.utility.Vector3dVector(points)
+        pcd.estimate_normals(
+            search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=2.0, max_nn=15)
+        )
+        pcd.normalize_normals()
 
         print("Writing to disk....")
         open3d.io.write_point_cloud(pcd_file, pcd)

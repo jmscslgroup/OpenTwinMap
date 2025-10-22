@@ -5,6 +5,7 @@ import numpy as np
 from tqdm import tqdm
 import joblib
 import math
+import sys
 import hashlib
 import xml.etree.ElementTree as ET
 
@@ -43,6 +44,9 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
             "corrected_coordinates": np.array([0, 0, 0]),
             "lane_widths": [],
             "lane_counts": [],
+            "oneways": [],
+            "lanes_backwards": [],
+            "lanes_forwards": [],
             "bridge": False,
         }
 
@@ -73,17 +77,15 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
             }
             self.ways_original[w_id]["bridge"] = [bridge for n in w.nodes]
             nodes = []
-            lanes = w.tags.get("lanes")
-            if lanes is not None:
-                try:
-                    lane_count = int(lanes)
-                    self.ways_original[w_id]["lane_count"] = [
-                        lane_count for n in w.nodes
-                    ]
-                except ValueError:
-                    self.ways_original[w_id]["lane_count"] = [1 for n in w.nodes]
-            else:
-                self.ways_original[w_id]["lane_count"] = [1 for n in w.nodes]
+            lanes = int(w.tags["lanes"]) if "lanes" in w.tags else 1
+            lanes_oneway = w.tags["oneway"] == "yes" if "oneway" in w.tags else False
+            # We assume the American system where an additional odd lane will be on the right
+            lanes_backward = int(w.tags["lanes:backward"]) if "lanes:backward" in w.tags else (0 if lanes_oneway else lanes // 2)
+            lanes_forward = int(w.tags["lanes:forward"]) if "lanes:forward" in w.tags else (lanes if lanes_oneway else lanes - lanes_backward)
+            self.ways_original[w_id]["lane_count"] = [lanes for n in w.nodes]
+            self.ways_original[w_id]["oneway"] = [lanes_oneway for n in w.nodes]
+            self.ways_original[w_id]["lanes_backward"] = [lanes_backward for n in w.nodes]
+            self.ways_original[w_id]["lanes_forward"] = [lanes_forward for n in w.nodes]
             for n in w.nodes:
                 n_ref = str(n.ref)
                 self.ways_original[w_id]["nodes"].append(n_ref)
@@ -94,6 +96,15 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
                 self.nodes[n_ref]["lane_counts"].append(
                     self.ways_original[w_id]["lane_count"][0]
                 )
+                self.nodes[n_ref]["oneways"].append(
+                    self.ways_original[w_id]["oneway"][0]
+                )
+                self.nodes[n_ref]["lanes_backwards"].append(
+                    self.ways_original[w_id]["lanes_backward"][0]
+                )
+                self.nodes[n_ref]["lanes_forwards"].append(
+                    self.ways_original[w_id]["lanes_forward"][0]
+                )
                 self.nodes[n_ref]["lane_widths"].append(lane_width)
                 self.nodes[n_ref]["bridge"] = self.nodes[n_ref]["bridge"] or bridge
                 nodes.append(n_ref)
@@ -101,7 +112,7 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
                 self.node_graph.add_edge(node1, node2)
             self.ways[w_id] = self.ways_original[w_id].copy()
 
-    def generateImplicitWays(self, node_count=15, distance_bound=200, cores=48):
+    def generateImplicitWays(self, node_count=8, distance_bound=200, cores=48):
         all_segments = []
 
         def findPathsFromSource(node_graph, source, node_count):
@@ -159,6 +170,15 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
                 "lane_count": [
                     np.mean(self.nodes[node]["lane_counts"]) for node in segment
                 ],
+                "oneway": [
+                    any(self.nodes[node]["oneways"]) for node in segment
+                ],
+                "lanes_backward": [
+                    np.mean(self.nodes[node]["lanes_backwards"]) for node in segment
+                ],
+                "lanes_forward": [
+                    np.mean(self.nodes[node]["lanes_forwards"]) for node in segment
+                ],
                 "lane_width": [
                     np.mean(self.nodes[node]["lane_widths"]) for node in segment
                 ],
@@ -181,10 +201,11 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
         x, y = self.proj.transform(x, y)
         x = x * self.feet_to_meters
         y = y * self.feet_to_meters
+        x, y = x - self.osm_origin_x, y - self.osm_origin_y
         return np.array([x, y, z])
 
     def projectToOSM(self, coordinates):
-        x, y, z = coordinates[0], coordinates[1], coordinates[2]
+        x, y, z = coordinates[0] + self.osm_origin_x, coordinates[1] + self.osm_origin_y, coordinates[2]
         x = x * self.meters_to_feet
         y = y * self.meters_to_feet
         x, y = self.proj.transform(x, y, direction="INVERSE")
@@ -217,6 +238,8 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
                 top_right[0] = x
             if top_right[1] < y:
                 top_right[1] = y
+        #print(wid, bottom_left, top_right, way_coordinates)
+        #sys.stdout.flush()
         return np.array([bottom_left[0], bottom_left[1], top_right[0], top_right[1]])
 
     def annotateWayWithCorrectedPoints(self, wid, way_coordinates):

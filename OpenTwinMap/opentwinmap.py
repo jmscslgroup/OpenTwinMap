@@ -21,9 +21,9 @@ class OpenTwinMap:
         if self.dataset_type == "tdot":
             creator = TDOTSubsetCreator(self.dataset_path, self.loaded_dataset_path)
             creator.compileMetadata()
-            creator.compileDEMSubset()
+            #creator.compileDEMSubset()
             creator.compileLidarSubset()
-            creator.compileOSMSubset()
+            #creator.compileOSMSubset()
 
     def performOSMLidarTuning(self):
         OSMLidarCorrection.performOSMLidarTuning(self.dataset_path, self.loaded_dataset_path, self.dataset_type)
@@ -58,8 +58,8 @@ class OpenTwinMap:
         #self.importSourceData()
         #self.performOSMLidarTuning()
         self.convertOSMToOpenDrive()
-        self.create3DAssets()
-        self.export3DAssetsToCARLA()
+        #self.create3DAssets()
+        #self.export3DAssetsToCARLA()
 
 
 if __name__ == "__main__":

@@ -68,9 +68,10 @@ class TDOTSubset:
             self.meters_index.insert(k_int, meters_bbox)
             self.coords_index.insert(k_int, coords_bbox)
 
-    def __init__(self, root_folder, osm_path="osm_subset.osm"):
+    def __init__(self, root_folder, osm_path="osm_subset.osm", recenter_global_origin_meters=False):
         self.osm_path = osm_path
         self.root_folder = root_folder
+        self.recenter_global_origin_meters = recenter_global_origin_meters
         self.metadata_json = TDOTUtils.loadJson(self.getMetadataPath())
         self.proj = pyproj.Transformer.from_crs(
             "EPSG:4326", "EPSG:6576", always_xy=True
@@ -147,8 +148,8 @@ class TDOTSubset:
     def getBoundsInMeters(self):
         bounds_coords = self.getBoundsInCoords()
         result = [0, 0, 0, 0]
-        result[:2] = self.convertToMeters(bounds_coords[:2])
-        result[2:] = self.convertToMeters(bounds_coords[2:])
+        result[:2] = self.convertToMeters(bounds_coords[:2], ignore_origin=True)
+        result[2:] = self.convertToMeters(bounds_coords[2:], ignore_origin=True)
         return np.array(result)
 
     def getAllTiles(self):
@@ -159,16 +160,29 @@ class TDOTSubset:
         return DEM.from_csv(dem_path, 2.0, -999999)
 
     def processLAZ(self, pcd_points):
-        pcd_points.estimate_normals(
-            search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=10.0, max_nn=30)
-        )
-        pcd_points.normalize_normals()
+        #pcd_points.estimate_normals(
+        #    search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=2.0, max_nn=15)
+        #)
+        #pcd_points.normalize_normals()
+        #pcd_points.orient_normals_to_align_with_direction(np.array([0, 0, 1.0]))
+        #pcd_points_legacy = pcd_points.to_legacy()
+        #open3d.geometry.orient_normals_to_align_with_direction(pcd_points_legacy, np.array([0, 0, 1.0]))
+        #pcd_points.point["normals"] = open3d.core.Tensor(np.asarray(pcd_points_legacy.normals), dtype=open3d.core.Dtype.Float32, device=pcd_points.device)
         pcd_points.paint_uniform_color([0.3, 0.3, 0.3])
         return pcd_points
 
     def loadLAZ(self, tile, process=False):
         pcd_path = self.getLAZPath(tile)
         pcd_points = open3d.io.read_point_cloud(pcd_path)
+        if self.recenter_global_origin_meters:
+            pcd_points_np = np.asarray(pcd_points.points).copy()
+            bounds = self.getBoundsInMeters()
+            origin = np.array([bounds[0], bounds[1], 0])
+            pcd_points_np = pcd_points_np - origin
+            old_normals = np.asarray(pcd_points.normals).copy()
+            pcd_points = open3d.geometry.PointCloud()
+            pcd_points.points = open3d.utility.Vector3dVector(pcd_points_np)
+            pcd_points.normals = open3d.utility.Vector3dVector(old_normals)
         if process:
             pcd_points = self.processLAZ(pcd_points)
         return pcd_points
@@ -177,8 +191,8 @@ class TDOTSubset:
         dems = [self.loadDEM(tile) for tile in tiles]
         return DEM.from_dems(dems, 2.0, -999999)
 
-    def loadLAZs(self, tiles, process=False, voxel_size=None, every_k_points=None):
-        pcds = [self.loadLAZ(tile, process) for tile in tiles]
+    def loadLAZs(self, tiles, process=True, voxel_size=None, every_k_points=None):
+        pcds = [self.loadLAZ(tile, process=process) for tile in tiles]
         if voxel_size is not None:
             for i in range(len(pcds)):
                 pcds[i] = pcds[i].voxel_down_sample(voxel_size=voxel_size)
@@ -187,13 +201,23 @@ class TDOTSubset:
                 pcds[i] = pcds[i].uniform_down_sample(every_k_points=every_k_points)
         return pcds
 
-    def convertToMeters(self, coord):
+    def convertToMeters(self, coord, ignore_origin=False):
         x, y = self.proj.transform(coord[0], coord[1])
         x *= self.feet_to_meters
         y *= self.feet_to_meters
+        if self.recenter_global_origin_meters and (not ignore_origin):
+            bounds = self.getBoundsInMeters()
+            x -= bounds[0]
+            y -= bounds[1]
         return np.array([x, y])
 
     def convertToCoords(self, meters):
+        meters_x = meters[0]
+        meters_y = meters[1]
+        if self.recenter_global_origin_meters:
+            bounds = self.getBoundsInMeters()
+            meters_x += bounds[0]
+            meters_y += bounds[1]
         x, y = self.proj.transform(
             meters[0] * self.meters_to_feet,
             meters[1] * self.meters_to_feet,
@@ -206,19 +230,25 @@ class TDOTSubset:
             [bbox[0] - margins, bbox[1] - margins, bbox[2] + margins, bbox[3] + margins]
         )
 
-    def loadDEMsFromBoundingBoxMeters(self, bbox, margins=10):
+    def loadDEMsFromBoundingBoxMeters(self, bbox, margins=30.0):
         bbox = self._augmentBBoxWithMargins(bbox, margins)
         tiles = self.getTilesFromBoundingBoxMeters(bbox)
         dems = self.loadDEMs(tiles)
+        bounds = self.getBoundsInMeters()
+        x_origin = 0
+        y_origin = 0
+        if self.recenter_global_origin_meters:
+            x_origin = bounds[0]
+            y_origin = bounds[1]
         cropped_dems = DEM.clip_dem(
             dems,
-            [bbox[0] * self.meters_to_feet, bbox[1] * self.meters_to_feet],
-            [bbox[2] * self.meters_to_feet, bbox[3] * self.meters_to_feet],
+            [(bbox[0] + x_origin) * self.meters_to_feet, (bbox[1] + y_origin) * self.meters_to_feet],
+            [(bbox[2] + x_origin) * self.meters_to_feet, (bbox[3] + y_origin) * self.meters_to_feet],
             margins=margins * self.meters_to_feet,
         )
         return cropped_dems
 
-    def loadLAZsFromBoundingBoxMeters(self, bbox, margins=10):
+    def loadLAZsFromBoundingBoxMeters(self, bbox, margins=30.0):
         bbox = self._augmentBBoxWithMargins(bbox, margins)
         tiles = self.getTilesFromBoundingBoxMeters(bbox)
         pcds = self.loadLAZs(tiles)
@@ -235,30 +265,38 @@ class TDOTSubset:
         return self.processLAZ(merged_pcd)
 
     def getTilesFromBoundingBoxMeters(self, bbox):
-        return [str(k) for k in self.meters_index.intersection(bbox)]
+        bbox_final = bbox
+        if self.recenter_global_origin_meters:
+            bounds = self.getBoundsInMeters()
+            bbox_final = np.array([bbox[0] + bounds[0], bbox[1] + bounds[1], bbox[2] + bounds[0], bbox[3] + bounds[1]])
+        return [str(k) for k in self.meters_index.intersection(bbox_final)]
 
     def loadDEMsFromBoundingBoxCoords(self, bbox):
-        bbox_meters = self.convertToMeters(bbox)
+        bbox_meters = [*self.convertToMeters(bbox[:2]), *self.convertToMeters(bbox[2:])]
         return self.loadDEMsFromBoundingBoxMeters(bbox_meters)
 
     def loadLAZsFromBoundingBoxCoords(self, bbox):
-        bbox_meters = self.convertToMeters(bbox)
+        bbox_meters = [*self.convertToMeters(bbox[:2]), *self.convertToMeters(bbox[2:])]
         return self.loadLAZsFromBoundingBoxMeters(bbox_meters)
 
     def getTilesFromBoundingBoxCoords(self, bbox):
-        bbox_meters = self.convertToMeters(bbox)
+        bbox_meters = [*self.convertToMeters(bbox[:2]), *self.convertToMeters(bbox[2:])]
         return self.getTilesFromBoundingBoxMeters(bbox_meters)
 
     def minHeightAtXYMeters(self, dem, xy_coord):
         # Extract X, Y, Z
         x, y = xy_coord
+        if self.recenter_global_origin_meters:
+            bounds = self.getBoundsInMeters()
+            x += bounds[0]
+            y += bounds[1]
         result = (
             dem.altitude((x * self.meters_to_feet), (y * self.meters_to_feet))
             * self.feet_to_meters
         )
         return result
 
-    def lidarMedianHeightAtXYMeters(self, pcd_points, xy_coord, bbox_size=10.0):
+    def lidarMedianHeightAtXYMeters(self, pcd_points, xy_coord, bbox_size=5.0):
         delta = bbox_size / 2.0
         bbox = open3d.geometry.AxisAlignedBoundingBox(
             min_bound=[xy_coord[0] - delta, xy_coord[1] - delta, float("-inf")],

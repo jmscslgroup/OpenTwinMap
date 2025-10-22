@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 import joblib
 import time
 import hashlib
+import sys
 from ..DataSources.tdot.tdot_subset import TDOTSubset
 from scipy.signal import savgol_filter
 from copy import deepcopy
@@ -72,6 +73,9 @@ class OSMLidarCorrection:
     def ExpandCenterlineToDenseRibbon(
         centerline_xyz,
         lanes,
+        oneway,
+        lanes_backward,
+        lanes_forward,
         lane_width,
         shoulder_width=1.8,
         width_resolution=0.21,
@@ -91,24 +95,45 @@ class OSMLidarCorrection:
             direction /= length
 
             # Perpendicular (2D) vector
-            perp = np.array([-direction[1], direction[0]])
+            perp = np.array([direction[1], -direction[0]])
 
             # Number of samples
             n_length = max(2, int(length / length_resolution))
+            '''
             n_width = max(
                 2,
                 int(((lane_width[i] * lanes[i]) + (2 * shoulder_width)) / width_resolution),
             )
-
+            '''
+            n_width_backward = int((lane_width[i] * lanes_backward[i] + shoulder_width) / width_resolution)
+            n_width_forward = int((lane_width[i] * lanes_forward[i] + shoulder_width)  / width_resolution)
+            # We kludge here and split into half backward, half forward. Othertimes we assume the centerline is split between forwards and backwards
+            '''
+            if oneway:
+                lanes_backward_i = lanes[i] // 2
+                lanes_forward_i = lanes[i] - lanes_backward_i
+                n_width_backward = int((lane_width[i] * lanes_backward_i + shoulder_width) / width_resolution)
+                n_width_forward = int((lane_width[i] * lanes_forward_i + shoulder_width)  / width_resolution)
+            '''
             for j in range(n_length + 1):
                 alpha = j / n_length
                 point_center = (1 - alpha) * p0 + alpha * p1
                 z = point_center[2]
 
+                for k in range(-n_width_backward, 0):
+                    offset = (k * width_resolution) * perp
+                    x, y = point_center[:2] + offset
+                    points.append([x, y, z])
+                for k in range(0, n_width_forward):
+                    offset = (k * width_resolution) * perp
+                    x, y = point_center[:2] + offset
+                    points.append([x, y, z])
+                '''
                 for k in range(-n_width // 2, n_width // 2 + 1):
                     offset = (k * width_resolution) * perp
                     x, y = point_center[:2] + offset
                     points.append([x, y, z])
+                '''
 
         return np.array(points)
 
@@ -218,13 +243,15 @@ class OSMLidarCorrection:
         way_coordinates,
         way_bounding_box_meters,
         lane_count,
+        oneway,
+        lanes_backward,
+        lanes_forward,
         lane_width,
         bridge,
     ):
         lidar_spacing = 0.21
 
         dem_data = dataset.loadDEMsFromBoundingBoxMeters(way_bounding_box_meters)
-
         # Create OSM cloud points
         for i in range(len(way_coordinates)):
             way_current_height = dataset.minHeightAtXYMeters(
@@ -240,6 +267,9 @@ class OSMLidarCorrection:
         expanded = OSMLidarCorrection.ExpandCenterlineToDenseRibbon(
             way_coordinates,
             lanes=lane_count,
+            oneway=oneway,
+            lanes_backward=lanes_backward,
+            lanes_forward=lanes_forward,
             lane_width=lane_width,
             width_resolution=lidar_spacing,
             length_resolution=lidar_spacing,
@@ -294,8 +324,13 @@ class OSMLidarCorrection:
         way_coordinates,
         way_bounding_box_meters,
         lane_count,
+        oneway,
+        lanes_backward,
+        lanes_forward,
         lane_width,
         bridge,
+        visualize=[]
+        #visualize=["108162374", "19447013", "970086456"]
     ):
         rng = np.random.default_rng(child_seed)
         # rng_generated = rng.integers(0, 1000)
@@ -303,7 +338,8 @@ class OSMLidarCorrection:
 
         pcd_points = dataset.loadLAZsFromBoundingBoxMeters(way_bounding_box_meters)
         if len(pcd_points.points) == 0:
-            print("No point cloud, returning identity")
+            print("No point cloud, returning identity", way_bounding_box_meters)
+            sys.stdout.flush()
             return (np.eye(4), 0.0, way_coordinates, way_coordinates)
 
         smoothed, way_coordinates = OSMLidarCorrection.convertWaysToWaysRibbons(
@@ -312,17 +348,21 @@ class OSMLidarCorrection:
             way_coordinates,
             way_bounding_box_meters,
             lane_count,
+            oneway,
+            lanes_backward,
+            lanes_forward,
             lane_width,
             bridge,
         )
         if len(smoothed) == 0:
             print("Way not long enough, returning identity")
+            sys.stdout.flush()
             return (np.eye(4), 0.0, way_coordinates, way_coordinates)
 
         osm_process_points = open3d.geometry.PointCloud()
         osm_process_points.points = open3d.utility.Vector3dVector(smoothed)
         thresholds = [0.35]
-        fitness_desire = 0.99
+        fitness_desire = 0.95
         transforms, fitnesses, mse = [], [], []
         # print(wid, " ready!")
         for i in thresholds:
@@ -333,7 +373,7 @@ class OSMLidarCorrection:
                 np.eye(4),  # Initial guess
                 open3d.pipelines.registration.TransformationEstimationPointToPlane(),
                 criteria=open3d.pipelines.registration.ICPConvergenceCriteria(
-                    relative_fitness=1e-10, relative_rmse=1e-10, max_iteration=200
+                    relative_fitness=1e-4, relative_rmse=1e-4, max_iteration=1000
                 ),
             )
             transform = reg_p2p.transformation
@@ -343,12 +383,20 @@ class OSMLidarCorrection:
                 transforms.append(transform)
                 fitnesses.append(fitness)
                 mse.append(rmse)
+            print(wid, transform, fitness)
+            sys.stdout.flush()
+            if wid in visualize:
+                pcd_points.paint_uniform_color([0.1, 0.1, 0.8]) # Blueish ribbon
+                osm_process_points.paint_uniform_color([0.8, 0.1, 0.1])  # redish ribbon
+                osm_adjusted_full_points = open3d.geometry.PointCloud(osm_process_points)
+                osm_adjusted_full_points.transform(transform)
+                osm_adjusted_full_points.paint_uniform_color([0.1, 0.8, 0.1]) # Greenish ribbon
+                open3d.visualization.draw_geometries([pcd_points, osm_process_points, osm_adjusted_full_points], window_name=f"WID: {wid}")
         if len(mse) > 0:
             best_index = np.argmin(mse)
             adjusted_osm_points = open3d.geometry.PointCloud()
             adjusted_osm_points.points = open3d.utility.Vector3dVector(way_coordinates)
             adjusted_osm_points.transform(transforms[best_index])
-
             osm_corrected_points = OSMLidarCorrection.conformToDEMs(
                 dataset, np.asarray(adjusted_osm_points.points), way_bounding_box_meters
             )
@@ -361,7 +409,7 @@ class OSMLidarCorrection:
         return (np.eye(4), 0.0, way_coordinates, way_coordinates)
 
     @staticmethod
-    def correctWaysWithLidar(dataset, osm_handler, cores=32):
+    def correctWaysWithLidar(dataset, osm_handler, cores=48):
         way_correction_arguments = []
         for wid, way_nodes in tqdm(osm_handler.ways.items()):
             way_nodes = osm_handler.getWayNodes(wid)
@@ -372,6 +420,9 @@ class OSMLidarCorrection:
                 wid, project_to_meters=True
             )
             lane_count = osm_handler.ways[wid]["lane_count"]
+            oneway = osm_handler.ways[wid]["oneway"]
+            lanes_backward = osm_handler.ways[wid]["lanes_backward"]
+            lanes_forward = osm_handler.ways[wid]["lanes_forward"]
             lane_width = osm_handler.ways[wid]["lane_width"]
             bridge = osm_handler.ways[wid]["bridge"]
             arguments = [
@@ -379,8 +430,11 @@ class OSMLidarCorrection:
                 way_coordinates,
                 way_bounding_box_meters,
                 lane_count,
+                oneway,
+                lanes_backward,
+                lanes_forward,
                 lane_width,
-                bridge,
+                bridge
             ]
             # print(arguments)
             way_correction_arguments.append(arguments)
@@ -388,8 +442,7 @@ class OSMLidarCorrection:
         ss = np.random.SeedSequence(2024)
         child_seeds = ss.spawn(len(way_correction_arguments))
 
-        way_correction_results = list(
-            tqdm(
+        way_correction_results = list(tqdm(
                 joblib.Parallel(return_as="generator", n_jobs=cores)(
                     joblib.delayed(OSMLidarCorrection.processLidarCorrection)(
                         child_seed,
@@ -400,13 +453,16 @@ class OSMLidarCorrection:
                         way_correction_arguments[i][3],
                         way_correction_arguments[i][4],
                         way_correction_arguments[i][5],
+                        way_correction_arguments[i][6],
+                        way_correction_arguments[i][7],
+                        way_correction_arguments[i][8],
                     )
                     for child_seed, i in zip(
                         child_seeds, range(len(way_correction_arguments))
                     )
                 ),
                 total=len(way_correction_arguments),
-            )
+        )
         )
 
         for i in range(len(way_correction_results)):
@@ -416,6 +472,7 @@ class OSMLidarCorrection:
             original_transformation_matrix_fitness = way_correction_results[i][1]
             way_coordinates_with_elevation = way_correction_results[i][2]
             osm_corrected_points = way_correction_results[i][3]
+            print(wid, way_coordinates, original_transformation_matrix, original_transformation_matrix_fitness, way_coordinates_with_elevation)
             osm_handler.annotateWayWithCorrectedPoints(
                 wid, osm_corrected_points
             )
@@ -439,7 +496,7 @@ class OSMLidarCorrection:
     def performOSMLidarTuning(original_dataset_path, dataset_path, dataset_selection):
         dataset = None
         if dataset_selection == "tdot":
-            dataset = TDOTSubset(dataset_path, original_dataset_path)
+            dataset = TDOTSubset(dataset_path, recenter_global_origin_meters=True)
         else:
             raise Exception("Invalid dataset selection!")
         osm_handler = OSMLidarCorrection.loadOSM(dataset)
