@@ -297,6 +297,17 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             strings.append(shapely.LineString([p0_adjusted, p1_adjusted]))
         return strings
     
+    # Assume a line string has only two points
+    def extendLineString(self, line, cap_lengths=100.0):
+        p0 = np.array(line.coords[0])
+        p1 = np.array(line.coords[1])
+        direction = p1 - p0
+        length = np.linalg.norm(direction)
+        direction /= length
+        p0_adjusted = p0 - (direction * cap_lengths)
+        p1_adjusted = p1 + (direction * cap_lengths)
+        return shapely.LineString([p0_adjusted, p1_adjusted])
+    
     # We assume each line only has two points
     def isPointLeftOfLine(self, point, line):
         (x1, y1), (x2, y2) = line.coords[:2]
@@ -313,7 +324,9 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         result_way_coordinates = []
         for string in way_strings:
             new_point = shapely.Point(string.coords[0])
-            are_we_left = self.isPointLeftOfLine(new_point, other_way_strings[-1])
+            other_way_string = other_way_strings[-1]
+            other_way_string_extended = self.extendLineString(other_way_string)
+            are_we_left = self.isPointLeftOfLine(new_point, other_way_string_extended)
             if are_we_left:
                 new_point = self.getPointOnLineClosestToPoint(new_point, other_way_strings[-1])
                 print("NEW POINT", new_point)
@@ -329,14 +342,24 @@ class OSMToOpenDrive(osmium.SimpleHandler):
         result_way_coordinates.append(np.array(way_strings[0].coords[0]))
         for string in way_strings:
             new_point = shapely.Point(string.coords[1])
-            are_we_left = self.isPointLeftOfLine(new_point, other_way_strings[0])
+            other_way_string = other_way_strings[0]
+            other_way_string_extended = self.extendLineString(other_way_string)
+            are_we_left = self.isPointLeftOfLine(new_point, other_way_string_extended)
             if are_we_left:
-                new_point = self.getPointOnLineClosestToPoint(new_point, other_way_strings[0])
+                new_point = self.getPointOnLineClosestToPoint(new_point, other_way_string_extended)
                 print("NEW POINT", new_point)
             new_point = np.array(new_point.coords[0])
             result_way_coordinates.append(new_point)
 
         return result_way_coordinates
+    
+    def getWaysOfTypeOnNode(self, nid, way_type, ignore_list=[]):
+        node = self.nodes[nid]
+        result = []
+        for connected_way in node["connected_ways"]:
+            if (connected_way not in ignore_list) and (self.ways[connected_way]["way_type"] == way_type):
+                result.append(connected_way)
+        return result
 
     def detectJunctions(self):
         current_dictionary_nodes = list(self.nodes.keys())
@@ -403,6 +426,20 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                         # Correct subsequent ramp nodes
                         for ramp_nid, ramp_coordinates in zip(self.ways[motorway_link_wid]["nodes"], new_ramp_coordinates):
                             self.nodes[ramp_nid]["meters_coordinates"] = np.array([*ramp_coordinates, self.nodes[ramp_nid]["meters_coordinates"][2]])
+
+                        # Correct the downstream motorway_links if it exists
+                        ramp_last_nid = self.ways[motorway_link_wid]["nodes"][-1]
+                        motorway_link_connected_wids = self.getWaysOfTypeOnNode(ramp_last_nid, "motorway_link", [motorway_link_wid])
+                        for motorway_link_connected_wid in motorway_link_connected_wids:
+                            ramp_string = self.generateWayLineString(motorway_link_connected_wid, lane_delta=0)
+                            print("OFF-RAMP ", ramp_string)
+                            new_ramp_coordinates = self.makeWayFlushWithOtherWayOffRamp(ramp_string, outgoing_motorway_string)
+                            print("New coordinates ", new_ramp_coordinates)
+
+                            # Correct subsequent ramp nodes
+                            for ramp_nid, ramp_coordinates in zip(self.ways[motorway_link_connected_wid]["nodes"], new_ramp_coordinates):
+                                self.nodes[ramp_nid]["meters_coordinates"] = np.array([*ramp_coordinates, self.nodes[ramp_nid]["meters_coordinates"][2]])
+
                         self.junctions[junction_id]["type"] = "off_ramp"
 
                     # On-ramp
@@ -434,6 +471,19 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                         # Correct subsequent ramp nodes
                         for ramp_nid, ramp_coordinates in zip(self.ways[motorway_link_wid]["nodes"], new_ramp_coordinates):
                             self.nodes[ramp_nid]["meters_coordinates"] = np.array([*ramp_coordinates, self.nodes[ramp_nid]["meters_coordinates"][2]])
+
+                        # Correct the Upstream motorway_links if it exists
+                        ramp_first_nid = self.ways[motorway_link_wid]["nodes"][0]
+                        motorway_link_connected_wids = self.getWaysOfTypeOnNode(ramp_first_nid, "motorway_link", [motorway_link_wid])
+                        for motorway_link_connected_wid in motorway_link_connected_wids:
+                            ramp_string = self.generateWayLineString(motorway_link_connected_wid, lane_delta=0)
+                            print("ON-RAMP ", ramp_string)
+                            new_ramp_coordinates = self.makeWayFlushWithOtherWayOffRamp(ramp_string, incoming_motorway_string)
+                            print("New coordinates ", new_ramp_coordinates)
+
+                            # Correct subsequent ramp nodes
+                            for ramp_nid, ramp_coordinates in zip(self.ways[motorway_link_connected_wid]["nodes"], new_ramp_coordinates):
+                                self.nodes[ramp_nid]["meters_coordinates"] = np.array([*ramp_coordinates, self.nodes[ramp_nid]["meters_coordinates"][2]])
                         self.junctions[junction_id]["type"] = "on_ramp"
                     self.junctions[junction_id]["type_data"] = type_data              
 
