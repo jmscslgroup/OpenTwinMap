@@ -112,7 +112,7 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
                 self.node_graph.add_edge(node1, node2)
             self.ways[w_id] = self.ways_original[w_id].copy()
 
-    def generateImplicitWays(self, node_count=8, distance_bound=200, cores=48):
+    def generateImplicitWays(self, node_count=15, distance_bound=500, cores=64):
         all_segments = []
 
         def findPathsFromSource(node_graph, source, node_count):

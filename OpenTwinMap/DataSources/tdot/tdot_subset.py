@@ -160,6 +160,7 @@ class TDOTSubset:
         return DEM.from_csv(dem_path, 2.0, -999999)
 
     def processLAZ(self, pcd_points):
+        #pcd_points = pcd_points.voxel_down_sample(voxel_size=2.0)
         #pcd_points.estimate_normals(
         #    search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=2.0, max_nn=15)
         #)

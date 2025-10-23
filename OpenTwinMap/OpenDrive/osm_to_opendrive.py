@@ -7,6 +7,7 @@ import subprocess
 import concurrent.futures
 import joblib
 import sys
+import shapely
 from tqdm import tqdm
 from . import opendrive
 
@@ -267,6 +268,42 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                 counts[wid_type].append(wid)
                 counts["all"].append(wid)
         return counts
+    
+    def generateWayLineString(self, wid, lane_delta=0):
+        way_data = self.ways[wid]
+        strings = []
+        for i in range(len(way_data["nodes"]) - 1):
+            node_1 = self.nodes[way_data["nodes"][i]]
+            node_2 = self.nodes[way_data["nodes"][i + 1]]
+            p0 = node_1["meters_coordinates"]
+            p1 = node_2["meters_coordinates"]
+            # Segment direction
+            direction = p1[:2] - p0[:2]
+            length = np.linalg.norm(direction)
+            if length == 0:
+                continue
+            direction /= length
+
+            # Perpendicular (2D) vector
+            perp = np.array([direction[1], -direction[0], 0])
+            p0_adjusted = p0 + (lane_delta * perp)
+            p1_adjusted = p1 + (lane_delta * perp)
+            strings.append(shapely.LineString([p0_adjusted, p1_adjusted]))
+        return strings
+    
+    def makeWayFlushWithOtherWay(self, way_strings, other_way_strings):
+        result_way_coordinates = []
+        for string in way_strings:
+            new_point = np.array(string.coords[0])
+            for other_string in other_way_strings:
+                intersection = string.intersection(other_string)
+                if not intersection.is_empty:
+                    new_point = np.array(intersection.coords[0])
+                    break
+            result_way_coordinates.append(new_point)
+        # Last point is fully flush with the last coordinate of the last string
+        result_way_coordinates.append(np.array(way_strings[-1].coords[-1]))
+        return result_way_coordinates
 
     def detectJunctions(self):
         virtual_nodes = {}
@@ -302,24 +339,19 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                     type_data["ramp_way"] = motorway_link_wid
                     type_data["incoming_motorway"] = incoming_motorway_wid
                     type_data["outgoing_motorway"] = outgoing_motorway_wid
-                    p0 = node["meters_coordinates"]
-                    p1 = self.nodes[self.ways[outgoing_motorway_wid]["nodes"][1]]["meters_coordinates"]
-
-                    # Segment direction
-                    direction = p1[:2] - p0[:2]
-                    length = np.linalg.norm(direction)
-                    if length == 0:
-                        continue
-                    direction /= length
-
-                    # Perpendicular (2D) vector
-                    perp = np.array([direction[1], -direction[0], 0])
+                    ramp_string = self.generateWayLineString(motorway_link_wid)
                     # Off-ramp
                     # For off-ramps we have to create a virtual node at the connection spot in place of the original connecting spot that is placed n forward lanes aft of the outgoing way's centerline.
+                    # All other points have to be adjusted to be to the right of the outgoing way
                     # for the off-ramp it is the first node of the ramp
                     if nid == self.ways[motorway_link_wid]["nodes"][0]:
-                        off_ramp_lane_number = self.ways[incoming_motorway_wid]["lane_count_forward"]
-                        p_ramp = p0 + (((off_ramp_lane_number - 1) * self.ways[incoming_motorway_wid]["lane_width"]) * perp)
+                        off_ramp_lane_number = self.ways[incoming_motorway_wid]["lane_count_forward"] - 1
+                        off_ramp_lane_delta = off_ramp_lane_number * self.ways[incoming_motorway_wid]["lane_width"]
+                        outgoing_motorway_string = self.generateWayLineString(outgoing_motorway_wid, lane_delta=off_ramp_lane_delta)
+                        new_ramp_coordinates = self.makeWayFlushWithOtherWay(ramp_string, outgoing_motorway_string)
+
+                        # Create virtual node
+                        p_ramp = new_ramp_coordinates[0]
                         p_ramp_nid = f"{incoming_motorway_wid}_ramp"
                         virtual_nodes[p_ramp_nid] = {
                             "nid": p_ramp_nid,
@@ -329,14 +361,23 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                         }
                         self.ways[motorway_link_wid]["nodes"][0] = p_ramp_nid
                         self.ways[incoming_motorway_wid]["virtual_nodes"].append(p_ramp_nid)
+
+                        # Correct subsequent ramp nodes
+                        for ramp_nid, ramp_coordinates in zip(self.ways[motorway_link_wid]["nodes"][1:], new_ramp_coordinates[1:]):
+                            self.nodes[ramp_nid]["meters_coordinates"] = ramp_coordinates
                         self.junctions[junction_id]["type"] = "off_ramp"
 
                     # On-ramp
                     # For on-ramps we have to create a virtual node at the connection spot in place of the original connecting spot that is placed n forward lanes aft of the outgoing way's centerline.
                     # for the on-ramp it is the last node of the ramp
                     elif nid == self.ways[motorway_link_wid]["nodes"][-1]:
-                        on_ramp_lane_number = self.ways[outgoing_motorway_wid]["lane_count_forward"]
-                        p_ramp = p0 + (((on_ramp_lane_number - 1) * self.ways[outgoing_motorway_wid]["lane_width"]) * perp)
+                        on_ramp_lane_number = self.ways[outgoing_motorway_wid]["lane_count_forward"] - 1
+                        on_ramp_lane_delta = on_ramp_lane_number * self.ways[outgoing_motorway_wid]["lane_width"]
+                        incoming_motorway_string = self.generateWayLineString(incoming_motorway_wid, lane_delta=on_ramp_lane_delta)
+                        new_ramp_coordinates = self.makeWayFlushWithOtherWay(ramp_string, incoming_motorway_string)
+
+                        # Create virtual node
+                        p_ramp = new_ramp_coordinates[-1]
                         p_ramp_nid = f"{outgoing_motorway_wid}_ramp"
                         virtual_nodes[p_ramp_nid] = {
                             "nid": p_ramp_nid,
@@ -346,6 +387,10 @@ class OSMToOpenDrive(osmium.SimpleHandler):
                         }
                         self.ways[motorway_link_wid]["nodes"][-1] = p_ramp_nid
                         self.ways[outgoing_motorway_wid]["virtual_nodes"].append(p_ramp_nid)
+
+                        # Correct subsequent ramp nodes
+                        for ramp_nid, ramp_coordinates in zip(self.ways[motorway_link_wid]["nodes"][:-1], new_ramp_coordinates[:-1]):
+                            self.nodes[ramp_nid]["meters_coordinates"] = ramp_coordinates
                         self.junctions[junction_id]["type"] = "on_ramp"
                     self.junctions[junction_id]["type_data"] = type_data
         for nid in virtual_nodes:

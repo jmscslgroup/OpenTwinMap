@@ -362,7 +362,7 @@ class OSMLidarCorrection:
         osm_process_points = open3d.geometry.PointCloud()
         osm_process_points.points = open3d.utility.Vector3dVector(smoothed)
         thresholds = [0.35]
-        fitness_desire = 0.95
+        fitness_desire = 0.99
         transforms, fitnesses, mse = [], [], []
         # print(wid, " ready!")
         for i in thresholds:
@@ -373,7 +373,7 @@ class OSMLidarCorrection:
                 np.eye(4),  # Initial guess
                 open3d.pipelines.registration.TransformationEstimationPointToPlane(),
                 criteria=open3d.pipelines.registration.ICPConvergenceCriteria(
-                    relative_fitness=1e-4, relative_rmse=1e-4, max_iteration=1000
+                    relative_fitness=1e-5, relative_rmse=1e-5, max_iteration=5000
                 ),
             )
             transform = reg_p2p.transformation
@@ -503,7 +503,7 @@ class OSMLidarCorrection:
         osm_handler.generateImplicitWays()
 
         print("Lidar correction....")
-        OSMLidarCorrection.correctWaysWithLidar(dataset, osm_handler, cores=48)
+        OSMLidarCorrection.correctWaysWithLidar(dataset, osm_handler, cores=40)
 
         print("Writing new OSM")
         osm_handler.createCorrectedOSMFile(

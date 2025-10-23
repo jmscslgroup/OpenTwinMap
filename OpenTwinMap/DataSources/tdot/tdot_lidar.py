@@ -38,7 +38,7 @@ class TDOTLidarCreator:
         pcd = open3d.geometry.PointCloud()
         pcd.points = open3d.utility.Vector3dVector(points)
         pcd.estimate_normals(
-            search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=2.0, max_nn=15)
+            search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30)
         )
         pcd.normalize_normals()
 
