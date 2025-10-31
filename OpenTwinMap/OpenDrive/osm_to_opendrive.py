@@ -136,7 +136,8 @@ class OSMToOpenDrive(osmium.SimpleHandler):
             "junction_id": "-1",
         }
 
-    def way(self, w, whitelist=["19442996", "992670973", "635078745", "108162374", "108162237", "635078551", "19447013", "975552234", "635078708", "108162127", "108161979", "635078713", "635078556", "1032881778", "108162489"]):
+    #def way(self, w, whitelist=["19442996", "992670973", "635078745", "108162374", "108162237", "635078551", "19447013", "975552234", "635078708", "108162127", "108161979", "635078713", "108162489"]):
+    def way(self, w, whitelist=["977008894", "977008893", "963570020", "988591741"]):
         w_id = str(w.id)
         if len(whitelist) > 0:
             if w_id not in whitelist:
@@ -489,8 +490,8 @@ class OSMToOpenDrive(osmium.SimpleHandler):
 
     def generateOpenDriveHeader(self):
         geoReference = opendrive.GeoReference(
-            proj4="<![CDATA[+proj=tmerc +lat_0={0:0.10f} +lon_0={1:0.10f} +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs]]>".format(
-                self.bounds_coords[0], self.bounds_coords[1]
+            proj4="<![CDATA[+proj=utm +lat_0={0:0.10f} +lon_0={1:0.10f} +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs]]>".format(
+                self.bounds_coords[1], self.bounds_coords[0]
             )
         )
         return opendrive.Header(

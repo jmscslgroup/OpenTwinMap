@@ -60,7 +60,7 @@ class CarlaAssetImporter:
             f"-Script={script_name} {carla_asset_root}",
         ]
         print(args)
-        print(subprocess.run(args, capture_output=True, text=True, check=False))
+        print(subprocess.run(args, capture_output=False, text=True, check=False))
 
     def convertAssetTypeFromFbxToUnreal(self, asset_type, n_jobs=48):
         total_asset_names = list(self.dataset.metadata[asset_type].keys())

@@ -1,6 +1,7 @@
 import osmium
 import time
 import os
+import math
 import subprocess
 import pyproj
 import shapely
@@ -146,6 +147,171 @@ class WayNodeCollectorNodeBoundClipping(osmium.SimpleHandler):
                 root.remove(way)
 
         return tree
+    
+class TDOTOSMWayInterpolate(osmium.SimpleHandler):
+    MAX_DIST_M = 100.0   # <= 0.1 km target
+    HIGHWAY_WHITELIST = {
+        "motorway", "trunk", "primary", "secondary", "tertiary",
+        "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link",
+    }
+    def __init__(self, bounds):
+        self.proj = pyproj.Transformer.from_crs(
+            "EPSG:4326", "EPSG:6576", always_xy=True
+        )
+        bounds_min = self.projectCoordinateToMeters(bounds[:2], convert_to_origin=False)
+        self.origin = bounds_min
+        self.nodes = {}
+        self.new_nodes = {}
+        self.ways = {}
+        self.next_neg_node_id = -1
+
+    def projectCoordinateToMeters(self, coordinate, convert_to_origin=True):
+        result = list(self.proj.transform(coordinate[0], coordinate[1]))
+        if convert_to_origin:
+            result[0] -= self.origin[0]
+            result[1] -= self.origin[1]
+        return result
+
+    def projectMetersToCoordinate(self, meters):
+        return list(
+            self.proj.transform(
+                meters[0] + self.origin[0],
+                meters[1] + self.origin[1],
+                direction="INVERSE",
+            )
+        )
+
+    def node(self, n):
+        n_id = str(n.id)
+        n_id_int = int(n_id)
+        if n_id_int < self.next_neg_node_id:
+            self.next_neg_node_id = n_id_int - 1
+        self.nodes[n_id] = {"coordinates": [n.location.lon, n.location.lat], "ways": []}
+
+    def way(self, w):
+        highway_type = w.tags["highway"] if "highway" in w.tags else "None"
+        if highway_type not in self.HIGHWAY_WHITELIST:
+            return
+        w_id = str(w.id)
+        nodes = []
+        for n in w.nodes:
+            n_ref = str(n.ref)
+            nodes.append(n_ref)
+        self.ways[w_id] = {"nodes": nodes, "highway_type": highway_type}
+
+    # We assume the same elevation here. Should be more than fine for our purposes.
+    def calculateDistanceMeters(self, coordinate1, coordinate2):
+        coordinate1_meters = self.projectCoordinateToMeters(coordinate1)
+        coordinate2_meters = self.projectCoordinateToMeters(coordinate2)
+        return math.sqrt(((coordinate1_meters[0] - coordinate2_meters[0])**2) + ((coordinate1_meters[1] - coordinate2_meters[1])**2))
+
+    def densifyWays(self):
+        inserted_nodes_total = 0
+        densified_ways = 0
+        for w_id in self.ways:
+            nd_elems = self.ways[w_id]["nodes"]
+            if len(nd_elems) < 2:
+                continue
+
+            missing = False
+            for nd in nd_elems:
+                if nd not in self.nodes:
+                    missing = True
+                    break
+            if missing:
+                continue
+
+            new_nd_refs = []
+            changed = False
+
+            for i in range(len(nd_elems) - 1):
+                ref1 = nd_elems[i]
+                ref2 = nd_elems[i + 1]
+                ref1_coordinates = self.nodes[ref1]["coordinates"]
+                ref2_coordinates = self.nodes[ref2]["coordinates"]
+
+                if (i == 0):
+                    new_nd_refs.append(ref1)
+
+                d = self.calculateDistanceMeters(ref1_coordinates, ref2_coordinates)
+
+                if d > self.MAX_DIST_M:
+                    # number of inserts so that all segments <= MAX_DIST_M
+                    # segments = n+1; (d / (n+1)) <= MAX_DIST_M => n >= ceil(d/MAX_DIST_M) - 1
+                    n_insert = max(1, math.ceil(d / self.MAX_DIST_M) - 1)
+                    # Insert n points at fractions j/(n+1), j=1..n
+                    for j in range(1, n_insert + 1):
+                        f = j / float(n_insert + 1)
+                        lon, lat = self.interpolateLongLat(ref1_coordinates, ref2_coordinates, f)
+
+                        # Create new <node> with negative ID
+                        new_node = ET.Element("node")
+                        new_node.set("id", str(self.next_neg_node_id))
+                        new_node.set("version", "1")
+                        new_node.set("lon", f"{lon:.8f}")
+                        new_node.set("lat", f"{lat:.8f}")
+                        self.new_nodes[str(self.next_neg_node_id)] = new_node
+                        
+                        # Append to way's nd sequence
+                        new_nd_refs.append(str(self.next_neg_node_id))
+
+                        self.next_neg_node_id -= 1
+                        inserted_nodes_total += 1
+                        changed = True
+
+                # Always append the second original node of the pair
+                new_nd_refs.append(ref2)
+            self.ways[w_id]["nodes"] = new_nd_refs
+            if changed:
+                densified_ways += 1
+        
+    @staticmethod
+    def interpolateLongLat(p1, p2, f):
+        """Linear interpolation in lon/lat space: p = (1-f)*p1 + f*p2"""
+        (lon1, lat1), (lon2, lat2) = p1, p2
+        return (lon1 + f*(lon2 - lon1), lat1 + f*(lat2 - lat1))
+    
+    def getLastNodeIndex(self, root):
+        nodes = root.findall("node")
+        last_node = nodes[-1]
+        return list(root).index(last_node)
+    
+    def updateOSMFile(self, tree):
+        root = tree.getroot()
+        insert_index = self.getLastNodeIndex(root) + 1
+        # Add new nodes
+        for new_node in self.new_nodes:
+            root.insert(insert_index, self.new_nodes[new_node])
+
+        # Update Ways to have new node lists
+        for way in root.iter("way"):
+            w_id = way.get("id")
+            if w_id not in self.ways:
+                continue
+            for nd in list(way.findall("nd")):
+                way.remove(nd)
+
+            children = list(way)
+            first_tag_idx = next((i for i, c in enumerate(children) if c.tag == 'tag'), None)
+
+            def make_nd(ref):
+                e = ET.Element("nd")
+                e.set("ref", str(ref))
+                return e
+        
+            new_nd_elems = [make_nd(ref) for ref in self.ways[w_id]["nodes"]]
+
+            if first_tag_idx is None:
+                for e in new_nd_elems:
+                    way.append(e)
+            else:
+                idx = first_tag_idx
+                for e in new_nd_elems:
+                    way.insert(idx, e)
+                    idx += 1
+        return tree
+
+            
 
 
 class TDOTOSMCreator:
@@ -177,6 +343,9 @@ class TDOTOSMCreator:
         merged_osm_original = os.path.join(
             self.root_folder, "osm_subset_merged_no_bounds.osm"
         )
+        merged_osm_interp = os.path.join(
+            self.root_folder, "osm_subset_merged_interp.osm"
+        )
         merged_osm_final = os.path.join(self.root_folder, "osm_subset.osm")
 
         parallel_result = joblib.Parallel(n_jobs=2, backend="multiprocessing")(
@@ -198,10 +367,21 @@ class TDOTOSMCreator:
         )
         tree = ET.parse(merged_osm_original)
 
+        # Way interpolation
+        node_interpolate = TDOTOSMWayInterpolate(
+            [min_long, min_lat, max_long, max_lat]
+        )
+        node_interpolate.apply_file(merged_osm_original)
+        node_interpolate.densifyWays()
+        tree = node_interpolate.updateOSMFile(tree)
+        tree.write(merged_osm_interp, encoding="utf-8", xml_declaration=True)
+
+        # Bound clipping
+        tree = ET.parse(merged_osm_interp)
         clipping_processor = WayNodeCollectorNodeBoundClipping(
             [min_long, min_lat, max_long, max_lat]
         )
-        clipping_processor.apply_file(merged_osm_original)
+        clipping_processor.apply_file(merged_osm_interp)
         clipping_processor.clipToInside()
         clipping_processor.removeExternalPoints()
         tree = clipping_processor.correctOSMFile(tree)
@@ -224,4 +404,6 @@ class TDOTOSMCreator:
             current_bounds_tag.set("maxlat", f"{max_lat:.8f}")
             current_bounds_tag.set("maxlon", f"{max_long:.8f}")
 
+
         tree.write(merged_osm_final, encoding="utf-8", xml_declaration=True)
+

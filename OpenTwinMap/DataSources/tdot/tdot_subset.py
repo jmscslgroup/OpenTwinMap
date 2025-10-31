@@ -231,8 +231,10 @@ class TDOTSubset:
             [bbox[0] - margins, bbox[1] - margins, bbox[2] + margins, bbox[3] + margins]
         )
 
-    def loadDEMsFromBoundingBoxMeters(self, bbox, margins=30.0):
+    def loadDEMsFromBoundingBoxMeters(self, bbox, margins=20.0):
+        print("Original bounding box: ", bbox)
         bbox = self._augmentBBoxWithMargins(bbox, margins)
+        print("New bbox: ", bbox)
         tiles = self.getTilesFromBoundingBoxMeters(bbox)
         dems = self.loadDEMs(tiles)
         bounds = self.getBoundsInMeters()
@@ -249,7 +251,7 @@ class TDOTSubset:
         )
         return cropped_dems
 
-    def loadLAZsFromBoundingBoxMeters(self, bbox, margins=30.0):
+    def loadLAZsFromBoundingBoxMeters(self, bbox, margins=20.0):
         bbox = self._augmentBBoxWithMargins(bbox, margins)
         tiles = self.getTilesFromBoundingBoxMeters(bbox)
         pcds = self.loadLAZs(tiles)

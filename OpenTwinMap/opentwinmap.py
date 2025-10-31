@@ -7,10 +7,12 @@ from .OSMLidarCorrection.correct_osm_ways import OSMLidarCorrection
 
 
 class OpenTwinMap:
-    unreal_engine_path = "/home/richarwa/SecondSSD/UnrealEngine_4.26/"
-    carla_path = "/home/richarwa/SecondSSD/carla/"
+    #unreal_engine_path = "/home/richarwa/SecondSSD/UnrealEngine_4.26/"
+    #carla_path = "/home/richarwa/SecondSSD/carla/"
+    unreal_engine_path = "/workspaces/unreal-engine/"
+    carla_path = "/workspaces/carla/"
     dataset_type = "tdot"
-    dataset_path = "/home/richarwa/Documents/openstreetmap/TDOT_Davidson/"
+    dataset_path = "/workspaces/TDOT_Davidson/"
     loaded_dataset_path = "./SubsetSelection/"
     full_cooked_dataset_path = "./CarlaCooked/"
 
@@ -21,9 +23,9 @@ class OpenTwinMap:
         if self.dataset_type == "tdot":
             creator = TDOTSubsetCreator(self.dataset_path, self.loaded_dataset_path)
             creator.compileMetadata()
-            #creator.compileDEMSubset()
+            creator.compileDEMSubset()
             creator.compileLidarSubset()
-            #creator.compileOSMSubset()
+            creator.compileOSMSubset()
 
     def performOSMLidarTuning(self):
         OSMLidarCorrection.performOSMLidarTuning(self.dataset_path, self.loaded_dataset_path, self.dataset_type)
@@ -56,10 +58,10 @@ class OpenTwinMap:
 
     def runPipeline(self):
         #self.importSourceData()
-        #self.performOSMLidarTuning()
+        self.performOSMLidarTuning()
         self.convertOSMToOpenDrive()
-        #self.create3DAssets()
-        #self.export3DAssetsToCARLA()
+        self.create3DAssets()
+        self.export3DAssetsToCARLA()
 
 
 if __name__ == "__main__":

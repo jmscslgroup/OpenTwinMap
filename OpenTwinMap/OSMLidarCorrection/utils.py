@@ -50,8 +50,11 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
             "bridge": False,
         }
 
-    def way(self, w):
+    def way(self, w, whitelist=["977008894", "977008893", "963570020", "988591741"]):
         w_id = str(w.id)
+        if len(whitelist) > 0:
+            if w_id not in whitelist:
+                return
         if "highway" in w.tags:
             bridge = ("bridge" in w.tags) and (w.tags["bridge"] == "yes")
             lane_width_by_highway = {
@@ -112,7 +115,7 @@ class WayNodeCollectorLidarCorrection(osmium.SimpleHandler):
                 self.node_graph.add_edge(node1, node2)
             self.ways[w_id] = self.ways_original[w_id].copy()
 
-    def generateImplicitWays(self, node_count=15, distance_bound=500, cores=64):
+    def generateImplicitWays(self, node_count=10, distance_bound=1000, cores=64):
         all_segments = []
 
         def findPathsFromSource(node_graph, source, node_count):

@@ -26,8 +26,8 @@ def importAssets(manifest_data, asset_type, asset_names):
         task.destination_path = dest_path
         static_mesh_import_data = unreal.FbxStaticMeshImportData()
         static_mesh_import_data.combine_meshes = True
-        static_mesh_import_data.generate_lightmap_u_vs = True
-        static_mesh_import_data.auto_generate_collision = True
+        static_mesh_import_data.generate_lightmap_u_vs = False
+        static_mesh_import_data.auto_generate_collision = False
         static_mesh_import_data.import_translation = unreal.Vector(0, 0, 0)
         static_mesh_import_data.import_rotation = unreal.Rotator(0, 0, 0)
         static_mesh_import_data.import_uniform_scale = 1.0
@@ -48,6 +48,7 @@ def importAssets(manifest_data, asset_type, asset_names):
         dest_name = os.path.basename(asset_type_data[asset_name]["unreal_path"])
         dest_path = os.path.dirname(asset_type_data[asset_name]["unreal_path"])
         material_path = asset_type_data[asset_name]["material"]
+        
         """
         original_path = f"{dest_path}/{dest_name}_{dest_name}"
         unreal.EditorAssetLibrary.rename_asset(original_path, full_unreal_path)
@@ -57,6 +58,12 @@ def importAssets(manifest_data, asset_type, asset_names):
 
         if isinstance(mesh, unreal.StaticMesh) or isinstance(mesh, unreal.SkeletalMesh):
             mesh.set_material(0, material)
+            bs = mesh.get_editor_property("body_setup")
+            if not bs:
+                mesh.set_editor_property("body_setup", unreal.BodySetup(outer=mesh, name="BodySetup"))
+                bs = mesh.get_editor_property("body_setup")
+            # Set “Use Complex Collision as Simple”
+            bs.set_editor_property("collision_trace_flag", unreal.CollisionTraceFlag.CTF_USE_COMPLEX_AS_SIMPLE)
             unreal.EditorAssetLibrary.save_loaded_asset(mesh)
 
 

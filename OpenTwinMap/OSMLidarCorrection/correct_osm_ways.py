@@ -329,7 +329,7 @@ class OSMLidarCorrection:
         lanes_forward,
         lane_width,
         bridge,
-        visualize=[]
+        visualize=["977008894", "977008893", "963570020", "988591741"],
         #visualize=["108162374", "19447013", "970086456"]
     ):
         rng = np.random.default_rng(child_seed)
@@ -362,7 +362,7 @@ class OSMLidarCorrection:
         osm_process_points = open3d.geometry.PointCloud()
         osm_process_points.points = open3d.utility.Vector3dVector(smoothed)
         thresholds = [0.35]
-        fitness_desire = 0.99
+        fitness_desire = 0.98
         transforms, fitnesses, mse = [], [], []
         # print(wid, " ready!")
         for i in thresholds:
@@ -385,7 +385,8 @@ class OSMLidarCorrection:
                 mse.append(rmse)
             print(wid, transform, fitness)
             sys.stdout.flush()
-            if wid in visualize:
+            #if wid in visualize:
+            if True:
                 pcd_points.paint_uniform_color([0.1, 0.1, 0.8]) # Blueish ribbon
                 osm_process_points.paint_uniform_color([0.8, 0.1, 0.1])  # redish ribbon
                 osm_adjusted_full_points = open3d.geometry.PointCloud(osm_process_points)
@@ -409,7 +410,7 @@ class OSMLidarCorrection:
         return (np.eye(4), 0.0, way_coordinates, way_coordinates)
 
     @staticmethod
-    def correctWaysWithLidar(dataset, osm_handler, cores=48):
+    def correctWaysWithLidar(dataset, osm_handler, cores=40):
         way_correction_arguments = []
         for wid, way_nodes in tqdm(osm_handler.ways.items()):
             way_nodes = osm_handler.getWayNodes(wid)
@@ -500,7 +501,7 @@ class OSMLidarCorrection:
         else:
             raise Exception("Invalid dataset selection!")
         osm_handler = OSMLidarCorrection.loadOSM(dataset)
-        osm_handler.generateImplicitWays()
+        #osm_handler.generateImplicitWays()
 
         print("Lidar correction....")
         OSMLidarCorrection.correctWaysWithLidar(dataset, osm_handler, cores=40)
@@ -513,4 +514,4 @@ class OSMLidarCorrection:
 
 
 if __name__ == "__main__":
-    OSMLidarCorrection.performOSMLidarTuning("/home/richarwa/Documents/openstreetmap/TDOT_Davidson/", "SubsetSelection/", "tdot")
+    OSMLidarCorrection.performOSMLidarTuning("/workspaces/TDOT_Davidson/", "SubsetSelection/", "tdot")

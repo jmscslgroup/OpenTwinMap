@@ -37,13 +37,17 @@ class TDOTLidarCreator:
         print("Building cloud and computing normals....")
         pcd = open3d.geometry.PointCloud()
         pcd.points = open3d.utility.Vector3dVector(points)
-        pcd.estimate_normals(
-            search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=1.0, max_nn=30)
+        #pcd_mesh = open3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(pcd, alpha=20.0)
+        #pcd_resampled = open3d.geometry.sample_points_poisson_disk(pcd_mesh, 14000000) # 14 million for a 2 by 3 thousand foot region.
+
+        pcd_resampled = pcd#.voxel_down_sample(voxel_size=3.0)
+        pcd_resampled.estimate_normals(
+            search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=5.0, max_nn=100)
         )
-        pcd.normalize_normals()
+        pcd_resampled.normalize_normals()
 
         print("Writing to disk....")
-        open3d.io.write_point_cloud(pcd_file, pcd)
+        open3d.io.write_point_cloud(pcd_file, pcd_resampled)
 
     @staticmethod
     def copyPCD(pcd_original_path, root_folder, new_pcd_path):

@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 import concurrent.futures
 from .carla_asset_dataset import CarlaAssetDataset
 from ..OpenDrive.opendrive import OpenDRIVE
-
+# Key thing in this file - Y going north is actually negative, Y going South is positive. This means we have to flip the sign on all our Y coordinates, but that is about it.
 
 def _generateTerrainTileMethod(
     carla_asset_root,
@@ -54,7 +54,9 @@ def _generateTerrainTileMethod(
     min_z_dem, max_z_dem = zv.min(), zv.max()
     xv -= min_x_dem
     yv -= min_y_dem
+    yv -= tile_size_y
     zv -= min_z_dem
+    # Flipping Y sign to support Unreal
     vertices = np.stack([xv, yv, zv], axis=1)
 
     faces = []
@@ -75,7 +77,7 @@ def _generateTerrainTileMethod(
 
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
     mesh.visual.uv = uvs
-    # Remember, in Unreal, x becomes y, and y becomes x.
+    # Remember, in Unreal, x stays the same, and y is flipped in sign.
     """
     R = trimesh.transformations.rotation_matrix(
         angle=np.radians(-90),
@@ -93,20 +95,21 @@ def _generateTerrainTileMethod(
 
     min_x, min_y, min_z = (
         min_x_dem - original_bounds[0],
-        min_y_dem - original_bounds[1],
+        -(min_y_dem - original_bounds[1]),
         min_z_dem - original_bounds[2],
     )
     max_x, max_y, max_z = (
         max_x_dem - original_bounds[0],
-        max_y_dem - original_bounds[1],
+        -(max_y_dem - original_bounds[1]),
         max_z_dem - original_bounds[2],
     )
+    #Remember - y is negative going north, so the max y we calculated is actually the min. Weird, I know.
     mesh_metadata = {}
     mesh_metadata["full_mesh_path"] = full_mesh_path
-    mesh_metadata["min_y"] = min_x
-    mesh_metadata["min_x"] = min_y
-    mesh_metadata["max_y"] = max_x
-    mesh_metadata["max_x"] = max_y
+    mesh_metadata["min_y"] = max_y
+    mesh_metadata["min_x"] = min_x
+    mesh_metadata["max_y"] = min_y
+    mesh_metadata["max_x"] = max_x
     mesh_metadata["min_z"] = min_z
     mesh_metadata["max_z"] = max_z
     mesh_metadata["tile_point_interval"] = tile_point_interval
@@ -345,7 +348,8 @@ def _generateRoadMeshMethod(
     uvs_np = np.array(uvs)
     min_x, min_y, min_z = vertices_np.min(axis=0)
     max_x, max_y, max_z = vertices_np.max(axis=0)
-    vertices_np -= np.array([min_x, min_y, min_z])
+    vertices_np -= np.array([min_x, max_y, min_z]) # Flip the Y side of the origin
+    min_y, max_y = -max_y, -min_y
     # min_x, min_y, min_z = min_x - original_bounds[0], min_y - original_bounds[1], min_z - original_bounds[2]
     # max_x, max_y, max_z = max_x - original_bounds[0], max_y - original_bounds[1], max_z - original_bounds[2]
     # Create the mesh
@@ -358,10 +362,10 @@ def _generateRoadMeshMethod(
 
     mesh_metadata = {}
     mesh_metadata["full_mesh_path"] = full_mesh_path
-    mesh_metadata["min_y"] = min_x
-    mesh_metadata["min_x"] = min_y
-    mesh_metadata["max_y"] = max_x
-    mesh_metadata["max_x"] = max_y
+    mesh_metadata["min_y"] = min_y
+    mesh_metadata["min_x"] = min_x
+    mesh_metadata["max_y"] = max_y
+    mesh_metadata["max_x"] = max_x
     mesh_metadata["min_z"] = min_z
     mesh_metadata["max_z"] = max_z
     mesh_metadata["road_data"] = ET.tostring(
@@ -409,7 +413,7 @@ def _generateMergedRoadMethod(carla_asset_root, group, name, full_mesh_path, mes
         # Define the translation vector (x, y, z)
         translation_vector = np.array(
             [min_y_diff, min_x_diff, min_z_diff]
-        )  # Example: move 5 units in x, -2 units in z
+        )
 
         # Create the translation matrix
         translation_matrix = trimesh.transformations.translation_matrix(
@@ -473,11 +477,11 @@ class CarlaAssetCreator:
             max_z,
         ]
         self.metadata["carla_bounds"] = [
-            map_data_bounds[1],
             map_data_bounds[0],
+            -map_data_bounds[1],
             min_z,
-            map_data_bounds[3],
             map_data_bounds[2],
+            -map_data_bounds[3], 
             max_z,
         ]
         del dem_data_tmp
@@ -659,7 +663,7 @@ class CarlaAssetCreator:
                     self.metadata["roads"][mesh_metadata["name"]] = mesh_metadata
                     print(mesh_metadata["name"])
 
-    def createMergedRoadsGroups(self, group_size=100):
+    def createMergedRoadsGroups(self, group_size=1):
         groups = []
 
         road_keys = list(self.metadata["roads"].keys())
