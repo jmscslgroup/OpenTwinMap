@@ -110,4 +110,4 @@ class CarlaAssetImporter:
         self.convertAssetTypeFromFbxToUnreal("terrain", n_jobs)
 
     def convertRoadsFromFbxToUnreal(self, n_jobs=1):
-        self.convertAssetTypeFromFbxToUnreal("merged_roads", n_jobs)
+        self.convertAssetTypeFromFbxToUnreal("roads", n_jobs)

@@ -14,7 +14,7 @@ class TDOTLidarCreator:
     root_folder: str = ""
     pcd_folder: str = ""
 
-    def __init__(self, root_folder):
+    def __init__(self, root_folder, bounds_bbox):
         self.root_folder = root_folder
         self.pcd_folder = os.path.join(self.root_folder, "pcd")
         os.makedirs(self.pcd_folder, exist_ok=True)

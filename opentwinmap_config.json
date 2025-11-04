@@ -1,0 +1,16 @@
+{
+    "bounds_polygon": [ [36.0236707, -86.6307739],
+                [36.0364784, -86.6450659],
+                [36.0236707, -86.6450659],
+                [36.0364784, -86.6307739]],
+    "bounds_bbox": [
+        [-86.6450659, 36.0236707],
+        [-86.6307739, 36.0364784]
+    ],
+    "unreal_engine_path": "/workspaces/unreal-engine/",
+    "carla_path": "/workspaces/carla/",
+    "dataset_type": "tdot",
+    "dataset_path": "/workspaces/TDOT_Davidson/",
+    "loaded_dataset_path": "./SubsetSelection/",
+    "full_cooked_dataset_path": "./CarlaCooked/"
+}

@@ -10,7 +10,7 @@ class TDOTDEMCreator:
     root_folder: str = ""
     dem_folder: str = ""
 
-    def __init__(self, root_folder):
+    def __init__(self, root_folder, bounds_bbox):
         self.root_folder = root_folder
         self.dem_folder = os.path.join(root_folder, "dem")
         os.makedirs(self.dem_folder, exist_ok=True)

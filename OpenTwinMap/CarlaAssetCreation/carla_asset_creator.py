@@ -96,12 +96,14 @@ def _generateTerrainTileMethod(
     min_x, min_y, min_z = (
         min_x_dem - original_bounds[0],
         -(min_y_dem - original_bounds[1]),
-        min_z_dem - original_bounds[2],
+        min_z_dem
+        #min_z_dem - original_bounds[2],
     )
     max_x, max_y, max_z = (
         max_x_dem - original_bounds[0],
         -(max_y_dem - original_bounds[1]),
-        max_z_dem - original_bounds[2],
+        max_z_dem
+        #max_z_dem - original_bounds[2],
     )
     #Remember - y is negative going north, so the max y we calculated is actually the min. Weird, I know.
     mesh_metadata = {}
@@ -288,7 +290,8 @@ def _generateRoadMeshMethod(
         # Normalised coordinate along length
         u_coord = s / road.length if road.length > 0 else 0.0
         # Add vertices: order matters for indexing later
-        opendrive_origin = [0, 0, original_bounds[2]]
+        #opendrive_origin = [0, 0, original_bounds[2]]
+        opendrive_origin = [0, 0, 0]
         road_vertices = road.generateRoadVerticesAtS(s, thickness, opendrive_origin)
         vertices.extend(road_vertices)
         sample_vertex_length_half = int(len(road_vertices) / 2)

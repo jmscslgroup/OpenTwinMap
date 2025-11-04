@@ -19,7 +19,7 @@ class TDOTMetadata:
     all_tiles = []
     subset_tiles = []
 
-    def __init__(self, original_data_path):
+    def __init__(self, original_data_path, bounds_bbox):
         self.original_data_path = original_data_path
         self.GEOJSON_path = os.path.join(self.original_data_path, self.GEOJSON_path)
         self.DEM_path = os.path.join(self.original_data_path, self.DEM_path)

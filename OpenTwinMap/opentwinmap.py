@@ -4,20 +4,24 @@ from .OpenDrive import osm_to_opendrive
 from .CarlaAssetCreation.carla_asset_creator import CarlaAssetCreator
 from .CarlaAssetCreation.carla_asset_importer import CarlaAssetImporter
 from .OSMLidarCorrection.correct_osm_ways import OSMLidarCorrection
+import json
+import os
 
 
 class OpenTwinMap:
-    #unreal_engine_path = "/home/richarwa/SecondSSD/UnrealEngine_4.26/"
-    #carla_path = "/home/richarwa/SecondSSD/carla/"
-    unreal_engine_path = "/workspaces/unreal-engine/"
-    carla_path = "/workspaces/carla/"
-    dataset_type = "tdot"
-    dataset_path = "/workspaces/TDOT_Davidson/"
-    loaded_dataset_path = "./SubsetSelection/"
-    full_cooked_dataset_path = "./CarlaCooked/"
+    config_file = "../opentwinmap_config.json"
 
     def __init__(self):
-        pass
+        with open(os.path.join(os.path.dirname(__file__), self.config_file)) as f:
+            config_data = json.load(f)
+            self.bounds_polygon = config_data["bounds_polygon"],
+            self.bounds_bbox = config_data["bounds_bbox"]
+            self.unreal_engine_path = config_data["unreal_engine_path"]
+            self.carla_path = config_data["carla_path"]
+            self.dataset_type = config_data["dataset_type"]
+            self.dataset_path = "/workspaces/TDOT_Davidson/"
+            self.loaded_dataset_path = config_data["loaded_dataset_path"]
+            self.full_cooked_dataset_path = config_data["full_cooked_dataset_path"]
 
     def importSourceData(self):
         if self.dataset_type == "tdot":
@@ -44,8 +48,8 @@ class OpenTwinMap:
         converter.convertTerrainFromObjToFbx()
         converter.generateRoads()
         converter.convertRoadsFromObjToFbx()
-        converter.generateMergedRoads()
-        converter.convertMergedRoadsFromObjToFbx()
+        #converter.generateMergedRoads()
+        #converter.convertMergedRoadsFromObjToFbx()
         converter.saveMetadata()
 
     def export3DAssetsToCARLA(self):
@@ -59,9 +63,9 @@ class OpenTwinMap:
     def runPipeline(self):
         #self.importSourceData()
         self.performOSMLidarTuning()
-        self.convertOSMToOpenDrive()
-        self.create3DAssets()
-        self.export3DAssetsToCARLA()
+        #self.convertOSMToOpenDrive()
+        #self.create3DAssets()
+        #self.export3DAssetsToCARLA()
 
 
 if __name__ == "__main__":

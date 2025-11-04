@@ -77,7 +77,7 @@ class OSMLidarCorrection:
         lanes_backward,
         lanes_forward,
         lane_width,
-        shoulder_width=1.8,
+        shoulder_width=3.0,
         width_resolution=0.21,
         length_resolution=0.21,
     ):
@@ -361,7 +361,7 @@ class OSMLidarCorrection:
 
         osm_process_points = open3d.geometry.PointCloud()
         osm_process_points.points = open3d.utility.Vector3dVector(smoothed)
-        thresholds = [0.35]
+        thresholds = [0.4]
         fitness_desire = 0.98
         transforms, fitnesses, mse = [], [], []
         # print(wid, " ready!")
@@ -373,7 +373,7 @@ class OSMLidarCorrection:
                 np.eye(4),  # Initial guess
                 open3d.pipelines.registration.TransformationEstimationPointToPlane(),
                 criteria=open3d.pipelines.registration.ICPConvergenceCriteria(
-                    relative_fitness=1e-5, relative_rmse=1e-5, max_iteration=5000
+                    relative_fitness=1e-5, relative_rmse=1e-5, max_iteration=10000
                 ),
             )
             transform = reg_p2p.transformation

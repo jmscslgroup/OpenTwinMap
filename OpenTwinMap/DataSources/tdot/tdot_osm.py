@@ -318,7 +318,7 @@ class TDOTOSMCreator:
     root_folder: str = None
     osm_folder: str = None
 
-    def __init__(self, root_folder):
+    def __init__(self, root_folder, bounds_bbox):
         self.root_folder = root_folder
         self.osm_folder = os.path.join(root_folder, "osm/")
         os.makedirs(self.osm_folder, exist_ok=True)
